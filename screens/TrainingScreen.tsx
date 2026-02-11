@@ -54,6 +54,24 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
 
   const liveClientRef = useRef<LiveClient | null>(null);
 
+  // Get API KEY safely
+  const getApiKey = () => {
+    let key = '';
+    try {
+      const meta = import.meta as any;
+      if (meta.env && meta.env.VITE_API_KEY) {
+        key = meta.env.VITE_API_KEY;
+      }
+    } catch (e) {}
+    
+    if (!key && typeof process !== 'undefined' && process.env) {
+      key = process.env.VITE_API_KEY || process.env.API_KEY || '';
+    }
+    return key;
+  };
+
+  const API_KEY = getApiKey();
+
   // --- Effects for Session ---
 
   useEffect(() => {
@@ -69,6 +87,20 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
           if (onConsumeScenario) onConsumeScenario();
       }
   }, [initialScenario]);
+
+  // Safety Timeout for Analysis (Same as AssessmentScreen)
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    if (status === ConnectionStatus.ANALYZING) {
+      timeoutId = setTimeout(() => {
+        setErrorMsg("Analysis timed out. Please try again.");
+        setStatus(ConnectionStatus.ERROR);
+        liveClientRef.current?.disconnect();
+      }, 20000);
+    }
+    return () => clearTimeout(timeoutId);
+  }, [status]);
+
 
   // Keyboard PTT
   useEffect(() => {
@@ -110,8 +142,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
   };
 
   const startTraining = async (scenario: Scenario) => {
-    if (!process.env.API_KEY) {
-       alert("API Key missing");
+    if (!API_KEY) {
+       alert("API Key missing. Please check .env file");
        return;
     }
     setActiveScenario(scenario);
@@ -122,7 +154,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     setErrorMsg(null);
     startTimeRef.current = Date.now();
 
-    liveClientRef.current = new LiveClient(process.env.API_KEY);
+    liveClientRef.current = new LiveClient(API_KEY);
     liveClientRef.current.setInputMuted(isPttEnabled);
 
     // COACHING INSTRUCTION
@@ -232,13 +264,15 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     }
   };
 
-  const handlePttDown = () => {
+  const handlePttDown = (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault();
     if (status === ConnectionStatus.CONNECTED) {
         setIsTransmitting(true);
         liveClientRef.current?.setInputMuted(false);
     }
   };
-  const handlePttUp = () => {
+  const handlePttUp = (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault();
     if (status === ConnectionStatus.CONNECTED) {
         setIsTransmitting(false);
         liveClientRef.current?.setInputMuted(true);
@@ -377,6 +411,15 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     return (
       <div className="h-full w-full relative flex flex-col bg-ios-bg overflow-hidden text-ios-text font-sans">
         
+        {/* Loading Overlay */}
+        {status === ConnectionStatus.ANALYZING && (
+          <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white animate-fade-in">
+              <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mb-6"></div>
+              <h2 className="text-2xl font-bold mb-2">Generating Feedback</h2>
+              <p className="text-white/80 text-center max-w-xs">Instructor is analyzing your performance...</p>
+          </div>
+        )}
+
         {/* Assessment Modal */}
         {assessment && (
           <AssessmentReport 
@@ -438,7 +481,6 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
               <div className="px-6 py-3 border-b border-black/5 flex justify-between items-center">
                   <span className="text-xs font-semibold text-ios-subtext">Live Transcript</span>
                   {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">Connecting...</span>}
-                  {status === ConnectionStatus.ANALYZING && <span className="text-xs text-ios-orange animate-pulse">Generating Feedback...</span>}
               </div>
               
               {/* Error Overlay */}
@@ -480,8 +522,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                     onMouseLeave={handlePttUp}
                     onTouchStart={handlePttDown}
                     onTouchEnd={handlePttUp}
+                    onContextMenu={(e) => e.preventDefault()}
                     disabled={status !== ConnectionStatus.CONNECTED}
-                    className={`flex-1 h-12 rounded-full font-bold text-lg shadow-lg transition-all duration-100 flex items-center justify-center border
+                    className={`flex-1 h-12 rounded-full font-bold text-lg shadow-lg transition-all duration-100 flex items-center justify-center border select-none touch-none
                     ${isTransmitting 
                         ? 'bg-ios-orange text-white border-ios-orange scale-95' 
                         : 'bg-white text-ios-text border-gray-200'}`}

@@ -176,18 +176,28 @@ export class LiveClient {
     await this.disconnect();
 
     // 2. Initialize Audio Contexts
-    this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-    this.outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    this.inputAudioContext = new AudioContextClass({ sampleRate: 16000 });
+    this.outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
     this.fullTranscript = "";
 
     try {
-      await this.inputAudioContext.resume();
-      await this.outputAudioContext.resume();
+      // Vital for iOS/Safari: Resume contexts immediately (must occur in user gesture, assuming connect is triggered by click)
+      if (this.inputAudioContext.state === 'suspended') await this.inputAudioContext.resume();
+      if (this.outputAudioContext.state === 'suspended') await this.outputAudioContext.resume();
+
       this.stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: { channelCount: 1, sampleRate: 16000 }
+        audio: { 
+            channelCount: 1, 
+            sampleRate: 16000,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+        }
       });
     } catch (err) {
-      callbacks.onError(new Error("Microphone permission denied"));
+      console.error("Audio Access Error:", err);
+      callbacks.onError(new Error("Microphone permission denied. Please allow access in settings."));
       return;
     }
 
@@ -252,7 +262,9 @@ export class LiveClient {
 
           const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
           if (base64Audio && this.outputAudioContext) {
-            if (this.outputAudioContext.state === 'suspended') await this.outputAudioContext.resume();
+            if (this.outputAudioContext.state === 'suspended') {
+                 await this.outputAudioContext.resume().catch(e => console.warn("Failed to resume audio", e));
+            }
 
             this.nextStartTime = Math.max(this.nextStartTime, this.outputAudioContext.currentTime);
             const audioBuffer = await decodeAudioData(

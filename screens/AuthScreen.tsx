@@ -51,15 +51,15 @@ const AuthScreen: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      await authService.signUp(email, password);
-      // Assume auto-login or successful creation, move to profile setup
-      // Note: If email confirmation is required, Supabase won't return a session immediately.
-      // For this demo, assuming email confirmation is disabled or we can proceed.
+      const { session } = await authService.signUp(email, password);
       
-      // We need to check if we have a session to insert profile. 
-      // If Supabase sends "Check your email", we can't insert profile yet.
-      // Let's assume for the MVP the user can login immediately.
-      setMode('register-step-2');
+      // CRITICAL: Check if we have a session. If not, email confirmation is enabled.
+      if (session) {
+          setMode('register-step-2');
+      } else {
+          setSuccessMsg("Registration successful! Please check your email to verify your account before logging in.");
+          setMode('login');
+      }
     } catch (err: any) {
       setError(err.message || 'Registration failed');
     } finally {
@@ -72,16 +72,6 @@ const AuthScreen: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      // Need to make sure we are logged in to insert profile
-      // If we are not logged in (due to email confirm), we might need to prompt user.
-      // Try to sign in just in case signUp didn't auto-signin
-      try {
-          await authService.signIn(email, password);
-      } catch (e) {
-          // If login fails, maybe they are already logged in or need email verify
-          console.log("Auto-login attempt during reg step 2:", e);
-      }
-
       await userService.createProfile({
         name: profileData.name,
         airline: profileData.airline,
@@ -90,10 +80,10 @@ const AuthScreen: React.FC = () => {
         current_icao_level: parseInt(profileData.current_icao_level)
       });
       // App.tsx auth state listener will handle transition to Home
-      // Force reload or state update if needed, but the session listener should catch it
       window.location.reload(); 
     } catch (err: any) {
-      setError(err.message || 'Failed to save profile');
+      console.error(err);
+      setError(err.message || 'Failed to save profile. Ensure you are logged in.');
     } finally {
       setLoading(false);
     }

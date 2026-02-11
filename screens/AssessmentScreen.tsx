@@ -28,10 +28,28 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   const [isTransmitting, setIsTransmitting] = useState(false);
 
   const liveClientRef = useRef<LiveClient | null>(null);
+  
+  // Get API KEY safely
+  const getApiKey = () => {
+    let key = '';
+    try {
+      const meta = import.meta as any;
+      if (meta.env && meta.env.VITE_API_KEY) {
+        key = meta.env.VITE_API_KEY;
+      }
+    } catch (e) {}
+    
+    if (!key && typeof process !== 'undefined' && process.env) {
+      key = process.env.VITE_API_KEY || process.env.API_KEY || '';
+    }
+    return key;
+  };
+
+  const API_KEY = getApiKey();
 
   useEffect(() => {
-    if (!process.env.API_KEY) {
-      setErrorMsg("API Key Missing in Environment");
+    if (!API_KEY) {
+      setErrorMsg("API Key Missing. Please check your .env file.");
     }
     return () => {
       liveClientRef.current?.disconnect();
@@ -42,12 +60,12 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout>;
     if (status === ConnectionStatus.ANALYZING) {
-      // If we don't get a result within 15 seconds, assume failure and reset
+      // If we don't get a result within 20 seconds, assume failure and reset
       timeoutId = setTimeout(() => {
         setErrorMsg("Analysis timed out. The model failed to return a report.");
         setStatus(ConnectionStatus.ERROR);
         liveClientRef.current?.disconnect();
-      }, 15000);
+      }, 20000);
     }
     return () => clearTimeout(timeoutId);
   }, [status]);
@@ -99,10 +117,10 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   };
 
   const handleConnect = async () => {
-    if (!process.env.API_KEY || !scenario) return;
+    if (!API_KEY || !scenario) return;
     
     setStatus(ConnectionStatus.CONNECTING);
-    liveClientRef.current = new LiveClient(process.env.API_KEY);
+    liveClientRef.current = new LiveClient(API_KEY);
     
     // Initial mute state based on PTT setting
     liveClientRef.current.setInputMuted(isPttEnabled);
@@ -190,13 +208,15 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   };
 
   // Handle onTouchStart/End for mobile PTT button
-  const handlePttDown = () => {
+  const handlePttDown = (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault(); // Prevent text selection/menu
     if (status === ConnectionStatus.CONNECTED) {
         setIsTransmitting(true);
         liveClientRef.current?.setInputMuted(false);
     }
   };
-  const handlePttUp = () => {
+  const handlePttUp = (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault();
     if (status === ConnectionStatus.CONNECTED) {
         setIsTransmitting(false);
         liveClientRef.current?.setInputMuted(true);
@@ -206,6 +226,15 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   return (
     <div className="h-full w-full relative flex flex-col bg-ios-bg overflow-hidden text-ios-text font-sans">
       
+      {/* Loading Overlay */}
+      {status === ConnectionStatus.ANALYZING && (
+          <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white animate-fade-in">
+              <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mb-6"></div>
+              <h2 className="text-2xl font-bold mb-2">Analyzing Performance</h2>
+              <p className="text-white/80 text-center max-w-xs">Generating ICAO Level 5 assessment report... This may take up to 20 seconds.</p>
+          </div>
+      )}
+
       {/* Assessment Modal */}
       {assessment && (
         <AssessmentReport 
@@ -263,7 +292,6 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
             <div className="px-6 py-3 border-b border-black/5 flex justify-between items-center">
                 <span className="text-xs font-semibold text-ios-subtext">Live Transcript</span>
                 {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">Connecting...</span>}
-                {status === ConnectionStatus.ANALYZING && <span className="text-xs text-ios-orange animate-pulse">Analyzing Proficiency...</span>}
             </div>
             
             {/* Error Overlay */}
@@ -292,7 +320,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
         {status === ConnectionStatus.DISCONNECTED || status === ConnectionStatus.ERROR ? (
            <button
              onClick={startBriefing}
-             disabled={!process.env.API_KEY}
+             disabled={!API_KEY}
              className="w-full h-12 rounded-full bg-ios-text text-white font-semibold text-lg shadow-lg hover:scale-[1.02] active:scale-95 transition-all duration-300 flex items-center justify-center space-x-2 disabled:opacity-50"
            >
              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -315,7 +343,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                     onMouseLeave={handlePttUp}
                     onTouchStart={handlePttDown}
                     onTouchEnd={handlePttUp}
-                    className={`flex-1 h-12 rounded-full font-bold text-lg shadow-lg transition-all duration-100 flex items-center justify-center border
+                    onContextMenu={(e) => e.preventDefault()}
+                    className={`flex-1 h-12 rounded-full font-bold text-lg shadow-lg transition-all duration-100 flex items-center justify-center border select-none touch-none
                     ${isTransmitting 
                         ? 'bg-ios-orange text-white border-ios-orange scale-95' 
                         : 'bg-white text-ios-text border-gray-200'}`}

@@ -2,6 +2,15 @@
 import { supabase } from './supabaseClient';
 import { AssessmentData } from '../types';
 
+export interface Skills {
+    Pronunciation: number;
+    Structure: number;
+    Vocabulary: number;
+    Fluency: number;
+    Comprehension: number;
+    Interactions: number;
+}
+
 export interface UserProfile {
     user_id: string;
     name: string;
@@ -12,7 +21,7 @@ export interface UserProfile {
     flight_hours: number;
     total_sorties: number;
     streak: number;
-    skills: any;
+    skills: Skills;
 }
 
 export const userService = {
@@ -23,7 +32,7 @@ export const userService = {
     },
 
     // Fetch user profile stats
-    async getProfile() {
+    async getProfile(): Promise<UserProfile | null> {
         const uid = await this.getCurrentUserId();
         if (!uid) return null;
 
@@ -33,18 +42,20 @@ export const userService = {
             .eq('user_id', uid)
             .single();
 
-        if (error && error.code !== 'PGRST116') { // PGRST116 is 'not found'
-            console.error('Error fetching profile:', error);
-            return null;
+        if (error) {
+             if (error.code !== 'PGRST116') { // PGRST116 is 'not found'
+                 console.error('Error fetching profile:', error);
+             }
+             return null;
         }
 
-        return data;
+        return data as UserProfile;
     },
 
     // Create a new profile (Used during registration)
     async createProfile(profileData: Partial<UserProfile>) {
         const uid = await this.getCurrentUserId();
-        if (!uid) throw new Error("No authenticated user");
+        if (!uid) throw new Error("No authenticated user session found. Please login first.");
 
         const newProfile = {
             user_id: uid,
@@ -122,27 +133,31 @@ export const userService = {
             const flightTimeHours = durationSeconds / 3600;
             
             // Update skills average if assessment exists
-            let newSkills = currentProfile.skills;
+            let newSkills: Skills = currentProfile.skills;
+            
             if (assessment) {
-                // Simple weighted average (80% old, 20% new) to show progression
-                const updateSkill = (oldVal: number, newVal: number) => parseFloat((oldVal * 0.8 + newVal * 0.2).toFixed(1));
+                // Simple weighted average (80% old, 20% new) to show progression but avoid volatility
+                const updateSkill = (oldVal: any, newVal: number) => {
+                    const numOld = typeof oldVal === 'number' ? oldVal : 3;
+                    return parseFloat((numOld * 0.8 + newVal * 0.2).toFixed(1));
+                };
+
                 newSkills = {
-                    Pronunciation: updateSkill(newSkills.Pronunciation || 3, assessment.pronunciation),
-                    Structure: updateSkill(newSkills.Structure || 3, assessment.structure),
-                    Vocabulary: updateSkill(newSkills.Vocabulary || 3, assessment.vocabulary),
-                    Fluency: updateSkill(newSkills.Fluency || 3, assessment.fluency),
-                    Comprehension: updateSkill(newSkills.Comprehension || 3, assessment.comprehension),
-                    Interactions: updateSkill(newSkills.Interactions || 3, assessment.interactions),
+                    Pronunciation: updateSkill(newSkills.Pronunciation, assessment.pronunciation),
+                    Structure: updateSkill(newSkills.Structure, assessment.structure),
+                    Vocabulary: updateSkill(newSkills.Vocabulary, assessment.vocabulary),
+                    Fluency: updateSkill(newSkills.Fluency, assessment.fluency),
+                    Comprehension: updateSkill(newSkills.Comprehension, assessment.comprehension),
+                    Interactions: updateSkill(newSkills.Interactions, assessment.interactions),
                 };
             }
 
             await supabase
                 .from('profiles')
                 .update({
-                    flight_hours: Number(currentProfile.flight_hours) + flightTimeHours,
-                    total_sorties: currentProfile.total_sorties + 1,
-                    // Simple streak logic
-                    streak: currentProfile.streak + 1, // Simplified increment
+                    flight_hours: Number(currentProfile.flight_hours || 0) + flightTimeHours,
+                    total_sorties: (currentProfile.total_sorties || 0) + 1,
+                    streak: (currentProfile.streak || 0) + 1,
                     skills: newSkills
                 })
                 .eq('user_id', uid);
