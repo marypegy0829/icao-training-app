@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type, Tool } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type, Tool, Schema } from '@google/genai';
 import { base64ToBytes, decodeAudioData } from './audioUtils';
 import { AssessmentData, Scenario, DifficultyLevel } from '../types';
 
@@ -44,68 +44,71 @@ function safeParseAssessment(data: any): AssessmentData {
     };
 }
 
-// Updated Tool Definition for Master-Level Report
-const assessmentToolDefinition: FunctionDeclaration = {
-  name: "reportAssessment",
-  description: "GENERATE THE FINAL EXAM REPORT based on the provided transcript and analysis framework.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      overallScore: { type: Type.INTEGER, description: "Lowest of sub-scores (1-6)." },
-      pronunciation: { type: Type.INTEGER },
-      structure: { type: Type.INTEGER },
-      vocabulary: { type: Type.INTEGER },
-      fluency: { type: Type.INTEGER },
-      comprehension: { type: Type.INTEGER },
-      interactions: { type: Type.INTEGER },
-      
-      executiveSummary: {
+// Schema for the Assessment Report (used by gemini-3-flash-preview)
+const assessmentSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    overallScore: { type: Type.NUMBER, description: "Overall ICAO Level (1-6)." },
+    pronunciation: { type: Type.NUMBER, description: "Score (1-6) for Pronunciation." },
+    structure: { type: Type.NUMBER, description: "Score (1-6) for Structure." },
+    vocabulary: { type: Type.NUMBER, description: "Score (1-6) for Vocabulary." },
+    fluency: { type: Type.NUMBER, description: "Score (1-6) for Fluency." },
+    comprehension: { type: Type.NUMBER, description: "Score (1-6) for Comprehension." },
+    interactions: { type: Type.NUMBER, description: "Score (1-6) for Interactions." },
+    
+    executiveSummary: {
+      type: Type.OBJECT,
+      properties: {
+        assessment: { type: Type.STRING, description: "Comprehensive summary in Simplified Chinese (150+ words)." },
+        safetyMargin: { type: Type.STRING, description: "Assessment of safety risks due to language (Chinese)." },
+        frictionPoints: { type: Type.STRING, description: "Specific instances of communication breakdown (Chinese)." }
+      },
+      required: ["assessment", "safetyMargin", "frictionPoints"]
+    },
+    
+    dimensionalDetails: {
+      type: Type.OBJECT,
+      properties: {
+        pronunciation: { type: Type.STRING, description: "Detailed analysis of accent, stress, and intonation (Chinese)." },
+        structure: { type: Type.STRING, description: "Analysis of grammatical errors and sentence patterns (Chinese)." },
+        vocabulary: { type: Type.STRING, description: "Analysis of phraseology usage and vocabulary range (Chinese)." },
+        fluency: { type: Type.STRING, description: "Analysis of tempo, hesitation, and discourse markers (Chinese)." },
+        comprehension: { type: Type.STRING, description: "Analysis of understanding and readback accuracy (Chinese)." },
+        interactions: { type: Type.STRING, description: "Analysis of response time and clarification handling (Chinese)." }
+      },
+      required: ["pronunciation", "structure", "vocabulary", "fluency", "comprehension", "interactions"]
+    },
+
+    deepAnalysis: {
+      type: Type.ARRAY,
+      description: "List of 3-5 critical linguistic errors found in the transcript.",
+      items: {
         type: Type.OBJECT,
         properties: {
-          assessment: { type: Type.STRING, description: "Holistic assessment of communicative competence." },
-          safetyMargin: { type: Type.STRING, description: "Impact on flight safety (e.g. risk of runway incursion)." },
-          frictionPoints: { type: Type.STRING, description: "Most critical failure points." }
+          context: { type: Type.STRING, description: "The exact quote from the user causing the error." },
+          issue: { type: Type.STRING, description: "Description of the error (Chinese)." },
+          theory: { type: Type.STRING, description: "Linguistic or ICAO principle violated (Chinese). Make it educational." },
+          rootCause: { type: Type.STRING, description: "Likely cause (e.g. L1 interference, lack of knowledge) (Chinese)." },
+          correction: { type: Type.STRING, description: "The correct standard phraseology or sentence (English)." }
         },
-        required: ["assessment", "safetyMargin", "frictionPoints"]
-      },
-      
-      dimensionalDetails: {
-        type: Type.OBJECT,
-        properties: {
-          pronunciation: { type: Type.STRING, description: "Specific diagnosis (e.g. L1 interference)." },
-          structure: { type: Type.STRING, description: "Grammar issues (Global vs Local)." },
-          vocabulary: { type: Type.STRING, description: "Phraseology usage." },
-          fluency: { type: Type.STRING, description: "Tempo, hesitation." },
-          comprehension: { type: Type.STRING, description: "Understanding of instructions." },
-          interactions: { type: Type.STRING, description: "Turn-taking and clarification." }
-        },
-        required: ["pronunciation", "structure", "vocabulary", "fluency", "comprehension", "interactions"]
-      },
-
-      deepAnalysis: {
-        type: Type.ARRAY,
-        description: "Top 3-4 critical errors analysis.",
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            context: { type: Type.STRING, description: "Scene/Line reference from transcript." },
-            issue: { type: Type.STRING, description: "Observed phenomenon." },
-            theory: { type: Type.STRING, description: "Linguistic theoretical basis (e.g. Expectancy Bias)." },
-            rootCause: { type: Type.STRING, description: "Cognitive/Linguistic root cause." },
-            correction: { type: Type.STRING, description: "Specific technique to fix it." }
-          },
-          required: ["context", "issue", "theory", "rootCause", "correction"]
-        }
-      },
-
-      remedialPlan: {
-        type: Type.ARRAY,
-        description: "3 specific actionable training methods.",
-        items: { type: Type.STRING }
+        required: ["context", "issue", "theory", "rootCause", "correction"]
       }
     },
-    required: ["overallScore", "pronunciation", "structure", "vocabulary", "fluency", "comprehension", "interactions", "executiveSummary", "dimensionalDetails", "deepAnalysis", "remedialPlan"]
-  }
+
+    remedialPlan: {
+      type: Type.ARRAY,
+      description: "3 Actionable, specific training exercises (Chinese).",
+      items: { type: Type.STRING }
+    }
+  },
+  required: ["overallScore", "pronunciation", "structure", "vocabulary", "fluency", "comprehension", "interactions", "executiveSummary", "dimensionalDetails", "deepAnalysis", "remedialPlan"]
+};
+
+// Keep Tool definition for Live API (Function Calling fallback)
+const assessmentToolDefinition: FunctionDeclaration = {
+    name: "reportAssessment",
+    description: "Generate the 6-Dimension ICAO Assessment Report.",
+    parameters: assessmentSchema
 };
 
 const tools: Tool[] = [{ functionDeclarations: [assessmentToolDefinition] }];
@@ -122,6 +125,8 @@ export class LiveClient {
   private inputSource: MediaStreamAudioSourceNode | null = null;
   private isInputMuted: boolean = false;
   private fullTranscript: string = ""; // Accumulate transcript for context
+  private currentCallbacks: LiveClientCallbacks | null = null;
+  private scenarioContext: Scenario | null = null;
 
   constructor(apiKey: string) {
     this.ai = new GoogleGenAI({ apiKey });
@@ -174,27 +179,36 @@ export class LiveClient {
   async connect(scenario: Scenario, callbacks: LiveClientCallbacks, difficulty: DifficultyLevel = DifficultyLevel.LEVEL_4_RECURRENT, customSystemInstruction?: string) {
     // 1. Clean up potential previous sessions or contexts
     await this.disconnect();
+    
+    this.currentCallbacks = callbacks;
+    this.scenarioContext = scenario;
+    this.fullTranscript = "";
 
     // 2. Initialize Audio Contexts
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    this.inputAudioContext = new AudioContextClass({ sampleRate: 16000 });
-    this.outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
-    this.fullTranscript = "";
-
+    
     try {
-      // Vital for iOS/Safari: Resume contexts immediately (must occur in user gesture, assuming connect is triggered by click)
+        this.inputAudioContext = new AudioContextClass({ sampleRate: 16000 });
+        this.outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
+    } catch (e) {
+        console.warn("Failed to suggest sample rate, falling back to default", e);
+        this.inputAudioContext = new AudioContextClass();
+        this.outputAudioContext = new AudioContextClass();
+    }
+    
+    try {
       if (this.inputAudioContext.state === 'suspended') await this.inputAudioContext.resume();
       if (this.outputAudioContext.state === 'suspended') await this.outputAudioContext.resume();
 
       this.stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
             channelCount: 1, 
-            sampleRate: 16000,
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true
         }
       });
+      console.log("Microphone access granted. Input Sample Rate:", this.inputAudioContext.sampleRate);
     } catch (err) {
       console.error("Audio Access Error:", err);
       callbacks.onError(new Error("Microphone permission denied. Please allow access in settings."));
@@ -207,10 +221,13 @@ export class LiveClient {
     // Dynamic Difficulty Instruction
     const difficultyPrompt = this.getDifficultyInstruction(difficulty);
 
-    // Master-Level System Prompt Injection
     const baseInstruction = `
-    # ROLE: ICAO English Examiner (ATC) & Aviation Applied Linguist
-    # OBJECTIVE: Conduct a realistic radiotelephony exam based on the selected difficulty.
+    # ROLE: Senior ICAO English Examiner (Level 4-6) & Senior Air Traffic Controller (20+ years experience)
+    # OBJECTIVE: Conduct a high-fidelity radiotelephony simulation and examination.
+
+    # YOU ARE:
+    1. A STRICT ATC: You use standard ICAO phraseology perfectly. You do not tolerate ambiguity.
+    2. AN EXAMINER: You are evaluating the candidate on: Pronunciation, Structure, Vocabulary, Fluency, Comprehension, and Interactions.
     
     # SCENARIO: ${scenario.title} (${scenario.category || 'General'})
     - Phase: ${scenario.phase}
@@ -220,130 +237,141 @@ export class LiveClient {
 
     ${difficultyPrompt}
 
-    # BEHAVIOR:
-    1. Act as ATC. Maintain professional phraseology.
-    2. Create complications based on the scenario details.
-    3. *** CRITICAL ***: When user sends "EXAM_FINISHED", STOP ACTING.
-    4. You will receive the full transcript. Analyze it deeply.
-    5. Call the \`reportAssessment\` tool with the analysis data.
-    
-    # ANALYSIS FRAMEWORK (Applied Linguistics):
-    - Diagnose root causes (e.g., Expectancy Bias, L1 Negative Transfer, Working Memory Overload).
-    - Distinguish between Standard Phraseology and Plain English.
-    - Assess Safety Margin (risk of runway incursion, etc.).
-    - Output language for the report: SIMPLIFIED CHINESE (简体中文).
+    # BEHAVIOR GUIDELINES:
+    - Act strictly as ATC. Do not break character unless strictly necessary (or if acting as COACH).
+    - If the user makes a readback error, correct them immediately as a real ATC would ("Negative, [correction]").
+    - Introduce realistic pauses, radio static simulation (via speech nuances), and urgency matching the situation.
+    - If the user fails to understand twice, use "Plain English" to clarify, but mark it as a vocabulary/comprehension issue.
     `;
 
     const finalInstruction = customSystemInstruction || baseInstruction;
 
-    this.sessionPromise = this.ai.live.connect({
-      model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-      callbacks: {
-        onopen: () => callbacks.onOpen(),
-        onmessage: async (message: LiveServerMessage) => {
-          if (message.toolCall) {
-            for (const fc of message.toolCall.functionCalls) {
-              if (fc.name === 'reportAssessment') {
-                const rawData = fc.args;
-                const data = safeParseAssessment(rawData);
-                callbacks.onAssessment(data);
-                this.sessionPromise?.then((session) => {
-                  session.sendToolResponse({
-                    functionResponses: {
-                      id: fc.id,
-                      name: fc.name,
-                      response: { result: "Report Generated Successfully" }
-                    }
-                  });
-                });
-              }
-            }
-          }
-
-          const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-          if (base64Audio && this.outputAudioContext) {
-            if (this.outputAudioContext.state === 'suspended') {
-                 await this.outputAudioContext.resume().catch(e => console.warn("Failed to resume audio", e));
-            }
-
-            this.nextStartTime = Math.max(this.nextStartTime, this.outputAudioContext.currentTime);
-            const audioBuffer = await decodeAudioData(
-              base64ToBytes(base64Audio),
-              this.outputAudioContext,
-              24000,
-              1
-            );
-            
-            const channelData = audioBuffer.getChannelData(0);
-            let sum = 0;
-            const step = Math.floor(channelData.length / 50) || 1;
-            for (let i = 0; i < channelData.length; i += step) {
-              sum += channelData[i] * channelData[i];
-            }
-            const rms = Math.sqrt(sum / (channelData.length / step));
-            const visualLevel = Math.min(1, rms * 8);
-            
-            callbacks.onAudioData(visualLevel);
-
-            const source = this.outputAudioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(outputNode);
-            source.addEventListener('ended', () => {
-              this.sources.delete(source);
-              if (this.sources.size === 0) callbacks.onAudioData(0);
-            });
-            source.start(this.nextStartTime);
-            this.nextStartTime += audioBuffer.duration;
-            this.sources.add(source);
-          }
-
-          const inputTranscript = message.serverContent?.inputTranscription?.text;
-          if (inputTranscript) {
-              this.fullTranscript += `User: ${inputTranscript}\n`;
-              callbacks.onTranscript(inputTranscript, 'user', true);
-          }
-
-          const outputTranscript = message.serverContent?.outputTranscription?.text;
-          if (outputTranscript) {
-              this.fullTranscript += `ATC: ${outputTranscript}\n`;
-              callbacks.onTranscript(outputTranscript, 'ai', false);
-          }
-
-          if (message.serverContent?.turnComplete) {
-            callbacks.onTurnComplete();
-            callbacks.onTranscript("", 'user', false);
-          }
-        },
-        onclose: () => callbacks.onClose(),
-        onerror: (e: any) => {
-          console.error("Gemini Live API Error:", e);
-          const msg = e.message || "Connection Error";
-          callbacks.onError(new Error(msg));
-        },
-      },
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-        },
-        systemInstruction: finalInstruction,
-        tools: tools,
-        inputAudioTranscription: {}, 
-        outputAudioTranscription: {},
-      },
-    });
-
+    // Wrap the connection logic in a try-catch to handle synchronous SDK errors
     try {
+        console.log("Initializing Gemini Live Session...");
+        // Use Gemini 2.5 Flash Native Audio for the real-time interaction
+        this.sessionPromise = this.ai.live.connect({
+          model: 'gemini-2.5-flash-native-audio-preview-12-2025', 
+          callbacks: {
+            onopen: () => {
+                console.log("Gemini Live Session Opened (Callback)");
+                callbacks.onOpen();
+            },
+            onmessage: async (message: LiveServerMessage) => {
+              // Handle Tool Calls (if model decides to call tool during session)
+              if (message.toolCall) {
+                for (const fc of message.toolCall.functionCalls) {
+                  if (fc.name === 'reportAssessment') {
+                    const rawData = fc.args;
+                    const data = safeParseAssessment(rawData);
+                    callbacks.onAssessment(data);
+                    // Acknowledge tool call
+                    this.sessionPromise?.then((session) => {
+                      session.sendToolResponse({
+                        functionResponses: {
+                          id: fc.id,
+                          name: fc.name,
+                          response: { result: "Report Generated" }
+                        }
+                      });
+                    });
+                  }
+                }
+              }
+
+              // Handle Audio Output
+              const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+              if (base64Audio && this.outputAudioContext) {
+                if (this.outputAudioContext.state === 'suspended') {
+                     await this.outputAudioContext.resume().catch(e => console.warn("Failed to resume audio ctx", e));
+                }
+
+                this.nextStartTime = Math.max(this.nextStartTime, this.outputAudioContext.currentTime);
+                
+                const audioBuffer = await decodeAudioData(
+                  base64ToBytes(base64Audio),
+                  this.outputAudioContext,
+                  24000,
+                  1
+                );
+                
+                // Visualization Data
+                const channelData = audioBuffer.getChannelData(0);
+                let sum = 0;
+                const step = Math.floor(channelData.length / 50) || 1;
+                for (let i = 0; i < channelData.length; i += step) {
+                  sum += channelData[i] * channelData[i];
+                }
+                const rms = Math.sqrt(sum / (channelData.length / step));
+                const visualLevel = Math.min(1, rms * 8);
+                
+                callbacks.onAudioData(visualLevel);
+
+                const source = this.outputAudioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(outputNode);
+                source.addEventListener('ended', () => {
+                  this.sources.delete(source);
+                  if (this.sources.size === 0) callbacks.onAudioData(0);
+                });
+                source.start(this.nextStartTime);
+                this.nextStartTime += audioBuffer.duration;
+                this.sources.add(source);
+              }
+
+              // Handle Transcripts
+              const inputTranscript = message.serverContent?.inputTranscription?.text;
+              if (inputTranscript) {
+                  this.fullTranscript += `User: ${inputTranscript}\n`;
+                  callbacks.onTranscript(inputTranscript, 'user', true);
+              }
+
+              const outputTranscript = message.serverContent?.outputTranscription?.text;
+              if (outputTranscript) {
+                  this.fullTranscript += `ATC: ${outputTranscript}\n`;
+                  callbacks.onTranscript(outputTranscript, 'ai', false);
+              }
+
+              if (message.serverContent?.turnComplete) {
+                callbacks.onTurnComplete();
+                callbacks.onTranscript("", 'user', false);
+              }
+            },
+            onclose: () => {
+                console.log("Gemini Live Session Closed (Callback)");
+                callbacks.onClose();
+            },
+            onerror: (e: any) => {
+              console.error("Gemini Live API Error (Callback):", e);
+              const msg = e.message || "Connection Error";
+              callbacks.onError(new Error(msg));
+            },
+          },
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+            },
+            systemInstruction: finalInstruction,
+            tools: tools,
+          },
+        });
+
         const session = await this.sessionPromise;
         this.startAudioInputStream();
+        
+        // Kickstart message
         try {
-            await session.send({ parts: [{ text: "Simulation Started. I am ready. Please contact me as ATC." }] });
+            if (typeof session.send === 'function') {
+                await session.send({ parts: [{ text: "Simulation Started. I am ready." }] });
+            }
         } catch (kickstartError) {
-            console.warn("Failed to send kickstart message:", kickstartError);
+            console.warn("Kickstart message skipped (optional).");
         }
+
     } catch (e: any) {
-        console.error("Failed to initialize session", e);
-        callbacks.onError(new Error(e.message || "Failed to initialize session"));
+        console.error("Failed to initialize session:", e);
+        callbacks.onError(new Error(e.message || "Failed to initialize session. Check API Key."));
     }
   }
 
@@ -351,7 +379,10 @@ export class LiveClient {
     if (!this.inputAudioContext || !this.stream) return;
 
     this.inputSource = this.inputAudioContext.createMediaStreamSource(this.stream);
-    this.processor = this.inputAudioContext.createScriptProcessor(2048, 1, 1);
+    this.processor = this.inputAudioContext.createScriptProcessor(4096, 1, 1);
+
+    const actualSampleRate = this.inputAudioContext.sampleRate;
+    const mimeType = `audio/pcm;rate=${actualSampleRate}`;
 
     this.processor.onaudioprocess = (e) => {
       if (this.isInputMuted) return;
@@ -360,12 +391,14 @@ export class LiveClient {
       const base64Data = this.float32ToBase64(inputData);
       
       this.sessionPromise?.then((session) => {
-        session.sendRealtimeInput({
-            media: {
-                mimeType: "audio/pcm;rate=16000",
-                data: base64Data
-            },
-        });
+        if (typeof session.sendRealtimeInput === 'function') {
+            session.sendRealtimeInput({
+                media: {
+                    mimeType: mimeType,
+                    data: base64Data
+                },
+            });
+        }
       });
     };
 
@@ -377,37 +410,91 @@ export class LiveClient {
     if (this.sessionPromise) {
         try {
             const session = await this.sessionPromise;
-            await session.send({
-                parts: [{ text: text }],
-            });
+            if (typeof session.send === 'function') {
+                await session.send({ parts: [{ text: text }] });
+            } else {
+                console.warn("session.send not supported for text input.");
+            }
         } catch(e) {
             console.error("Failed to send text", e);
         }
     }
   }
 
+  // --- NEW FINALIZE STRATEGY ---
+  // Instead of relying on the Live Session to generate the report (which fails if send() is missing),
+  // we disconnect the session and use a dedicated Text Model (Gemini 3 Flash) to process the transcript.
   async finalize() {
-    if (this.sessionPromise) {
-        try {
-            const session = await this.sessionPromise;
-            const finalPrompt = `
-[TRANSCRIPT START]
-${this.fullTranscript}
-[TRANSCRIPT END]
+    console.log("Finalizing session...");
+    
+    // 1. Disconnect immediately to stop audio processing
+    await this.disconnect();
 
-EXAM_FINISHED. Please generate the Master-Level Diagnostic Report now.
+    // 2. Generate Report using standard GenerateContent API
+    if (this.currentCallbacks && this.ai) {
+        if (!this.fullTranscript.trim()) {
+            console.warn("No transcript available for assessment.");
+             // Return empty/fail assessment
+             this.currentCallbacks.onAssessment(safeParseAssessment({
+                 overallScore: 1,
+                 executiveSummary: { assessment: "No audio detected.", safetyMargin: "N/A", frictionPoints: "N/A" }
+             }));
+            return;
+        }
+
+        try {
+            console.log("Generating assessment report using Gemini 3 Flash...");
+            const model = this.ai.models;
+            
+            // Construct the prompt for the text model
+            const prompt = `
+            # ICAO ENGLISH ASSESSMENT TASK (Strict JSON Output)
+            Based on the following transcript of a radiotelephony simulation, generate a detailed ICAO Level 5 assessment report.
+            
+            SCENARIO: ${this.scenarioContext?.title}
+            
+            TRANSCRIPT:
+            ${this.fullTranscript}
+            
+            REQUIREMENTS:
+            1. ACT AS A SENIOR EXAMINER. Be strict but educational.
+            2. JSON Output ONLY. Follow the schema exactly.
+            3. All text fields MUST be in SIMPLIFIED CHINESE (简体中文), except for specific English quotes or corrections.
+            4. In 'deepAnalysis', identify REAL errors (e.g. missing readback, wrong preposition, stuttering, non-standard phraseology). 
+            5. If performance was perfect, nitpick on minor fluency or pronunciation issues to provide value.
             `;
-            await session.send({
-                parts: [{ text: finalPrompt }],
-                turnComplete: true
+
+            // Use Gemini 3 Flash for high quality reasoning and JSON generation
+            const response = await model.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: prompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: assessmentSchema
+                }
             });
+
+            const jsonText = response.text;
+            if (jsonText) {
+                const parsed = JSON.parse(jsonText);
+                const safeData = safeParseAssessment(parsed);
+                this.currentCallbacks.onAssessment(safeData);
+            } else {
+                throw new Error("Empty response from assessment model.");
+            }
+
         } catch (e) {
-            console.error("Failed to finalize", e);
+            console.error("Report generation failed:", e);
+            // Return fallback error report
+            this.currentCallbacks.onAssessment(safeParseAssessment({
+                executiveSummary: { assessment: "Report generation failed due to network or model error.", safetyMargin: "N/A", frictionPoints: "N/A" }
+            }));
         }
     }
   }
 
   async disconnect() {
+    console.log("Disconnecting Live Client...");
     if (this.sessionPromise) {
         try {
             const session = await this.sessionPromise;
@@ -421,9 +508,11 @@ EXAM_FINISHED. Please generate the Master-Level Diagnostic Report now.
     if (this.processor) {
       this.processor.disconnect();
       this.processor.onaudioprocess = null;
+      this.processor = null;
     }
     if (this.inputSource) {
         this.inputSource.disconnect();
+        this.inputSource = null;
     }
     
     if (this.stream) {
@@ -433,9 +522,11 @@ EXAM_FINISHED. Please generate the Master-Level Diagnostic Report now.
     
     if (this.inputAudioContext && this.inputAudioContext.state !== 'closed') {
        try { await this.inputAudioContext.close(); } catch(e) {}
+       this.inputAudioContext = null;
     }
     if (this.outputAudioContext && this.outputAudioContext.state !== 'closed') {
        try { await this.outputAudioContext.close(); } catch(e) {}
+       this.outputAudioContext = null;
     }
     
     this.sources.forEach(source => {

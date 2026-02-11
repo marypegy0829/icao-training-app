@@ -122,6 +122,7 @@ export const userService = {
                 phase: phase,
                 score: score,
                 duration: durationStr,
+                duration_seconds: durationSeconds, // Added for robust analytics
                 details: assessment
             });
 
@@ -157,7 +158,8 @@ export const userService = {
                 .update({
                     flight_hours: Number(currentProfile.flight_hours || 0) + flightTimeHours,
                     total_sorties: (currentProfile.total_sorties || 0) + 1,
-                    streak: (currentProfile.streak || 0) + 1,
+                    // Note: Basic streak logic. In a robust app, this would be calculated via DB trigger or CRON based on last_active_date.
+                    streak: (currentProfile.streak || 0) + 1, 
                     skills: newSkills
                 })
                 .eq('user_id', uid);

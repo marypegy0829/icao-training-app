@@ -28,6 +28,10 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
   const [logs, setLogs] = useState<TrainingLog[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // API Key Management State
+  const [customKey, setCustomKey] = useState('');
+  const [showKeyInput, setShowKeyInput] = useState(false);
+
   useEffect(() => {
     const fetchData = async () => {
         setLoading(true);
@@ -38,10 +42,24 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
         
         if (profData) setProfile(profData as UserProfile);
         if (logsData) setLogs(logsData as TrainingLog[]);
+
+        const savedKey = localStorage.getItem('gemini_api_key');
+        if (savedKey) setCustomKey(savedKey);
+
         setLoading(false);
     };
     fetchData();
   }, []);
+
+  const handleSaveKey = () => {
+      if (customKey.trim()) {
+          localStorage.setItem('gemini_api_key', customKey.trim());
+          alert("Custom API Key Saved.");
+      } else {
+          localStorage.removeItem('gemini_api_key');
+          alert("Switched to Default/Env API Key.");
+      }
+  };
 
   const handleSignOut = async () => {
       try {
@@ -247,18 +265,37 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
                  </button>
              </div>
 
-             {/* Setting Item: Subscription */}
-             <div className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer">
-                 <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded-lg bg-ios-blue/10 text-ios-blue flex items-center justify-center">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
-                    </div>
-                    <span className="text-sm font-medium text-gray-900">Subscription Plan</span>
-                 </div>
-                 <div className="flex items-center text-gray-400">
-                     <span className="text-xs mr-2 font-semibold text-ios-orange">PRO Member</span>
-                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                 </div>
+             {/* Setting Item: Developer Settings / API Key */}
+             <div className="p-4 bg-gray-50/50">
+                 <button 
+                    onClick={() => setShowKeyInput(!showKeyInput)}
+                    className="flex items-center justify-between w-full text-xs font-bold text-gray-400 uppercase tracking-wider hover:text-gray-600 transition-colors"
+                 >
+                    <span>Developer Settings</span>
+                    <svg className={`w-4 h-4 transition-transform ${showKeyInput ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                 </button>
+                 
+                 {showKeyInput && (
+                     <div className="mt-3 animate-fade-in">
+                         <label className="block text-xs font-medium text-gray-500 mb-1">Custom Gemini API Key (Optional)</label>
+                         <div className="flex space-x-2">
+                             <input 
+                               type="password"
+                               value={customKey}
+                               onChange={(e) => setCustomKey(e.target.value)}
+                               placeholder="AIza..."
+                               className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-ios-blue"
+                             />
+                             <button 
+                                onClick={handleSaveKey}
+                                className="px-3 py-2 bg-ios-text text-white text-xs font-bold rounded-lg hover:bg-gray-800"
+                             >
+                                Save
+                             </button>
+                         </div>
+                         <p className="text-[9px] text-gray-400 mt-1">Leave empty to use default environment key. Stored locally.</p>
+                     </div>
+                 )}
              </div>
 
          </div>
@@ -273,7 +310,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
               Log Out
           </button>
           <p className="text-center text-[10px] text-gray-400 mt-4">
-              ICAO Examiner AI v1.3.0 (Build 502)<br/>
+              ICAO Examiner AI v1.3.1 (Build 503)<br/>
               Connected to icao5_trainer DB
           </p>
       </div>

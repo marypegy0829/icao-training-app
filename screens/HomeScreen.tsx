@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Tab, Scenario } from '../types';
 import RadarChart from '../components/RadarChart';
 import { TRAINING_SCENARIOS } from '../services/trainingData';
@@ -50,6 +50,13 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
   const [userName, setUserName] = useState('Captain');
   const [streak, setStreak] = useState(0);
 
+  // --- Audio Player State ---
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentLineIndex, setCurrentLineIndex] = useState(-1);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const synthRef = useRef<SpeechSynthesis | null>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
   useEffect(() => {
     // 1. Set Greeting
     const hour = new Date().getHours();
@@ -82,7 +89,84 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
         }
     };
     loadProfile();
+
+    // Initialize Speech Synth
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+        synthRef.current = window.speechSynthesis;
+    }
+
+    return () => {
+        stopAudio();
+    };
   }, []);
+
+  // Stop audio when modal closes
+  useEffect(() => {
+      if (!showCaseStudy) {
+          stopAudio();
+      }
+  }, [showCaseStudy]);
+
+  // Auto-scroll to active line
+  useEffect(() => {
+      if (currentLineIndex >= 0 && transcriptRef.current) {
+          const activeEl = transcriptRef.current.children[currentLineIndex] as HTMLElement;
+          if (activeEl) {
+              activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+      }
+  }, [currentLineIndex]);
+
+  const stopAudio = () => {
+      if (synthRef.current) {
+          synthRef.current.cancel();
+      }
+      setIsPlaying(false);
+      setCurrentLineIndex(-1);
+  };
+
+  const playCaseStudy = () => {
+      if (!synthRef.current) return;
+
+      // If already playing, stop (Toggle logic)
+      if (isPlaying) {
+          stopAudio();
+          return;
+      }
+
+      setIsPlaying(true);
+      speakLine(0);
+  };
+
+  const speakLine = (index: number) => {
+      if (!synthRef.current || index >= DAILY_CASE_STUDY.transcript.length) {
+          setIsPlaying(false);
+          setCurrentLineIndex(-1);
+          return;
+      }
+
+      setCurrentLineIndex(index);
+      const line = DAILY_CASE_STUDY.transcript[index];
+      const utter = new SpeechSynthesisUtterance(line.text);
+      
+      // Voice & Pitch Tweak
+      utter.lang = 'en-US';
+      utter.rate = 1.1; // Slightly faster for aviation context
+      
+      if (line.role === 'pilot') {
+          utter.pitch = 0.9; // Lower pitch for pilot
+      } else {
+          utter.pitch = 1.2; // Higher/Standard for ATC (Simulated radio filter effect via pitch)
+      }
+
+      utter.onend = () => {
+          speakLine(index + 1);
+      };
+
+      utteranceRef.current = utter;
+      synthRef.current.speak(utter);
+  };
+
 
   // Logic to find weakness and recommend scenario
   const getRecommendation = () => {
@@ -309,37 +393,54 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                       </button>
                   </div>
 
-                  {/* Audio Player Placeholder */}
+                  {/* Audio Player */}
                   <div className="bg-gray-900 p-4 flex items-center space-x-4">
-                      <button className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-black shadow-lg hover:scale-105 active:scale-95 transition-transform">
-                          <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                      <button 
+                        onClick={playCaseStudy}
+                        className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-black shadow-lg hover:scale-105 active:scale-95 transition-transform"
+                      >
+                          {isPlaying ? (
+                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                          ) : (
+                             <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+                          )}
                       </button>
-                      <div className="flex-1 h-8 flex items-center space-x-0.5">
+                      
+                      {/* Visualizer Bars */}
+                      <div className="flex-1 h-8 flex items-center space-x-0.5 overflow-hidden">
                           {[...Array(30)].map((_, i) => (
                               <div 
                                 key={i} 
-                                className="w-1 bg-white/40 rounded-full animate-pulse" 
+                                className={`w-1 bg-white/40 rounded-full transition-all duration-300 ${isPlaying ? 'animate-pulse' : ''}`}
                                 style={{
-                                    height: `${Math.random() * 100}%`, 
+                                    height: isPlaying ? `${Math.max(20, Math.random() * 100)}%` : '20%', 
+                                    animationDuration: `${0.2 + Math.random() * 0.3}s`,
                                     animationDelay: `${i * 0.05}s`
                                 }} 
                               />
                           ))}
                       </div>
-                      <span className="text-xs text-white font-mono">03:42</span>
+                      <span className="text-xs text-white font-mono">
+                          {isPlaying ? 'PLAYING' : 'AUDIO'}
+                      </span>
                   </div>
 
                   {/* Content */}
-                  <div className="p-6 overflow-y-auto space-y-6">
+                  <div className="p-6 overflow-y-auto space-y-6 flex-1">
                       <div>
                           <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest mb-3">Transcript Highlight</h3>
-                          <div className="space-y-3">
+                          <div className="space-y-3 max-h-[200px] overflow-y-auto scroll-smooth pr-1" ref={transcriptRef}>
                               {DAILY_CASE_STUDY.transcript.map((line, idx) => (
-                                  <div key={idx} className="flex space-x-3 text-sm">
-                                      <span className={`w-12 font-bold uppercase shrink-0 text-right ${line.role === 'pilot' ? 'text-ios-blue' : 'text-ios-orange'}`}>
+                                  <div 
+                                    key={idx} 
+                                    className={`flex space-x-3 text-sm p-2 rounded-lg transition-colors ${currentLineIndex === idx ? 'bg-yellow-50 border border-yellow-100 shadow-sm' : 'opacity-80'}`}
+                                  >
+                                      <span className={`w-12 font-bold uppercase shrink-0 text-right text-xs pt-0.5 ${line.role === 'pilot' ? 'text-ios-blue' : 'text-ios-orange'}`}>
                                           {line.role}
                                       </span>
-                                      <span className="text-gray-700 leading-relaxed font-mono">{line.text}</span>
+                                      <span className={`leading-relaxed font-mono ${currentLineIndex === idx ? 'text-gray-900 font-bold' : 'text-gray-600'}`}>
+                                          {line.text}
+                                      </span>
                                   </div>
                               ))}
                           </div>
@@ -356,7 +457,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                       </div>
                   </div>
                   
-                  <div className="p-4 border-t border-gray-100">
+                  <div className="p-4 border-t border-gray-100 bg-white">
                       <button 
                         onClick={handleCaseStudyPractice}
                         className="w-full py-3 bg-ios-text text-white rounded-xl font-bold shadow-lg active:scale-[0.98] transition-transform"

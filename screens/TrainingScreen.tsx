@@ -7,6 +7,7 @@ import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
 import Transcript from '../components/Transcript';
 import AssessmentReport from '../components/AssessmentReport';
+import HistoryModal from '../components/HistoryModal';
 import { userService } from '../services/userService';
 
 // UPDATED: 6-Stage Logical Phases
@@ -40,6 +41,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
   const [audioLevel, setAudioLevel] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [assessment, setAssessment] = useState<AssessmentData | null>(null);
+  const [showHistory, setShowHistory] = useState(false); // State for History Modal
   const startTimeRef = useRef<number>(0);
   
   // PTT State
@@ -54,8 +56,11 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
 
   const liveClientRef = useRef<LiveClient | null>(null);
 
-  // Get API KEY safely
+  // Get API KEY safely with Override
   const getApiKey = () => {
+    const localKey = localStorage.getItem('gemini_api_key');
+    if (localKey && localKey.trim().length > 0) return localKey.trim();
+
     let key = '';
     try {
       const meta = import.meta as any;
@@ -67,7 +72,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     if (!key && typeof process !== 'undefined' && process.env) {
       key = process.env.VITE_API_KEY || process.env.API_KEY || '';
     }
-    return key;
+    return key.trim();
   };
 
   const API_KEY = getApiKey();
@@ -96,7 +101,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
         setErrorMsg("Analysis timed out. Please try again.");
         setStatus(ConnectionStatus.ERROR);
         liveClientRef.current?.disconnect();
-      }, 20000);
+      }, 60000);
     }
     return () => clearTimeout(timeoutId);
   }, [status]);
@@ -143,7 +148,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
 
   const startTraining = async (scenario: Scenario) => {
     if (!API_KEY) {
-       alert("API Key missing. Please check .env file");
+       alert("API Key missing. Please check settings.");
        return;
     }
     setActiveScenario(scenario);
@@ -157,7 +162,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     liveClientRef.current = new LiveClient(API_KEY);
     liveClientRef.current.setInputMuted(isPttEnabled);
 
-    // COACHING INSTRUCTION
+    // COACHING INSTRUCTION WITH EXPLICIT REPORT TRIGGER
     const coachingInstruction = `
     # SYSTEM INSTRUCTION: FLIGHT INSTRUCTOR (COACHING MODE)
     The user is a pilot trainee. You are an ATC Instructor.
@@ -173,9 +178,12 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
        - Prefix the hint with "💡 COACH: ".
        - Then immediately resume ATC character in the next sentence.
        
-    3. If the user sends "EXAM_FINISHED", call the 'reportAssessment' tool.
-       - Be lenient in grading.
-       - Focus the feedback on teaching points.
+    3. *** CRITICAL: SESSION END & ASSESSMENT ***
+       When you receive the system command "TERMINATE_SESSION_IMMEDIATELY", or if the user says "Training Finished":
+       - STOP acting as ATC/Coach.
+       - You MUST call the 'reportAssessment' tool.
+       - You MUST evaluate the trainee on ALL 6 DIMENSIONS: Pronunciation, Structure, Vocabulary, Fluency, Comprehension, Interactions.
+       - Provide a "Quick Assessment" in the report. Be concise but cover all 6 points.
     `;
 
     // Pass difficulty to connect
@@ -290,15 +298,24 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
       });
 
       return (
-          <div className="h-full overflow-y-auto bg-ios-bg pb-20">
+          <div className="h-full overflow-y-auto bg-ios-bg pb-20 relative">
               
               {/* Header */}
-              <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border">
-                  <h1 className="text-2xl font-bold text-ios-text">专项训练</h1>
-                  <p className="text-sm text-ios-subtext">针对性强化飞行特情通话能力</p>
-                  <div className="mt-2 text-[10px] font-bold text-ios-blue bg-blue-50 inline-block px-2 py-0.5 rounded border border-blue-100 uppercase">
-                      Current Difficulty: {difficulty}
+              <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex justify-between items-start">
+                  <div>
+                      <h1 className="text-2xl font-bold text-ios-text">专项训练</h1>
+                      <p className="text-sm text-ios-subtext">针对性强化飞行特情通话能力</p>
+                      <div className="mt-2 text-[10px] font-bold text-ios-blue bg-blue-50 inline-block px-2 py-0.5 rounded border border-blue-100 uppercase">
+                          Current Difficulty: {difficulty}
+                      </div>
                   </div>
+                  {/* History Button */}
+                  <button 
+                    onClick={() => setShowHistory(true)}
+                    className="p-2 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200 transition-colors"
+                  >
+                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  </button>
               </div>
 
               {/* Recommended Section (Mock Logic) */}
@@ -418,17 +435,6 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
               <h2 className="text-2xl font-bold mb-2">Generating Feedback</h2>
               <p className="text-white/80 text-center max-w-xs">Instructor is analyzing your performance...</p>
           </div>
-        )}
-
-        {/* Assessment Modal */}
-        {assessment && (
-          <AssessmentReport 
-            data={assessment} 
-            onClose={() => {
-                setAssessment(null);
-                setView('dashboard');
-            }} 
-          />
         )}
 
         {/* Dynamic Background */}
@@ -555,7 +561,33 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     );
   };
 
-  return view === 'dashboard' ? renderDashboard() : renderSession();
+  return (
+    <>
+      {view === 'dashboard' ? renderDashboard() : renderSession()}
+      
+      {/* Assessment Modal - Rendered globally to support opening from History */}
+      {assessment && (
+        <AssessmentReport 
+          data={assessment} 
+          onClose={() => {
+              setAssessment(null);
+              setView('dashboard');
+          }} 
+        />
+      )}
+
+      {/* History Modal */}
+      {showHistory && (
+          <HistoryModal 
+            onClose={() => setShowHistory(false)}
+            onSelectReport={(data) => {
+                setAssessment(data);
+                setShowHistory(false);
+            }}
+          />
+      )}
+    </>
+  );
 };
 
 export default TrainingScreen;

@@ -8,6 +8,7 @@ import CockpitDisplay from '../components/CockpitDisplay';
 import Transcript from '../components/Transcript';
 import AssessmentReport from '../components/AssessmentReport';
 import BriefingModal from '../components/BriefingModal';
+import HistoryModal from '../components/HistoryModal';
 import { userService } from '../services/userService';
 
 interface AssessmentScreenProps {
@@ -21,6 +22,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [assessment, setAssessment] = useState<AssessmentData | null>(null);
   const [scenario, setScenario] = useState<Scenario | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const startTimeRef = useRef<number>(0);
   
   // PTT State
@@ -29,8 +31,32 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
 
   const liveClientRef = useRef<LiveClient | null>(null);
   
-  // Get API KEY safely
+  // Connection Watchdog Timer
+  useEffect(() => {
+      let watchdog: ReturnType<typeof setTimeout>;
+      
+      if (status === ConnectionStatus.CONNECTING) {
+          // If connection takes longer than 15 seconds, timeout
+          watchdog = setTimeout(() => {
+              if (status === ConnectionStatus.CONNECTING) {
+                  console.error("Connection timed out.");
+                  setStatus(ConnectionStatus.ERROR);
+                  setErrorMsg("Connection timed out. Please check your network and API Key.");
+                  liveClientRef.current?.disconnect();
+              }
+          }, 15000);
+      }
+
+      return () => clearTimeout(watchdog);
+  }, [status]);
+
+  // Get API KEY safely with Override support
   const getApiKey = () => {
+    // 1. Check Local Storage (User Override)
+    const localKey = localStorage.getItem('gemini_api_key');
+    if (localKey && localKey.trim().length > 0) return localKey.trim();
+
+    // 2. Env Vars
     let key = '';
     try {
       const meta = import.meta as any;
@@ -42,14 +68,14 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
     if (!key && typeof process !== 'undefined' && process.env) {
       key = process.env.VITE_API_KEY || process.env.API_KEY || '';
     }
-    return key;
+    return key.trim();
   };
 
   const API_KEY = getApiKey();
 
   useEffect(() => {
     if (!API_KEY) {
-      setErrorMsg("API Key Missing. Please check your .env file.");
+      setErrorMsg("API Key Missing. Please check your settings.");
     }
     return () => {
       liveClientRef.current?.disconnect();
@@ -60,12 +86,12 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout>;
     if (status === ConnectionStatus.ANALYZING) {
-      // If we don't get a result within 20 seconds, assume failure and reset
+      // If we don't get a result within 60 seconds (increased from 20), assume failure
       timeoutId = setTimeout(() => {
         setErrorMsg("Analysis timed out. The model failed to return a report.");
         setStatus(ConnectionStatus.ERROR);
         liveClientRef.current?.disconnect();
-      }, 20000);
+      }, 60000);
     }
     return () => clearTimeout(timeoutId);
   }, [status]);
@@ -117,7 +143,13 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   };
 
   const handleConnect = async () => {
-    if (!API_KEY || !scenario) return;
+    // 1. Strict Check for API Key
+    if (!API_KEY) {
+        setErrorMsg("API Key is missing. Check settings.");
+        setStatus(ConnectionStatus.ERROR);
+        return;
+    }
+    if (!scenario) return;
     
     setStatus(ConnectionStatus.CONNECTING);
     liveClientRef.current = new LiveClient(API_KEY);
@@ -126,57 +158,65 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
     liveClientRef.current.setInputMuted(isPttEnabled);
 
     // Connect with the global difficulty setting
-    await liveClientRef.current.connect(scenario, {
-      onOpen: () => {
-          setStatus(ConnectionStatus.CONNECTED);
-          startTimeRef.current = Date.now();
-      },
-      onClose: () => { 
-        setStatus(prev => {
-            // Keep ERROR state if set, otherwise go to DISCONNECTED
-            return prev === ConnectionStatus.ERROR ? prev : ConnectionStatus.DISCONNECTED;
-        }); 
-        setAudioLevel(0);
-      },
-      onError: (err) => { 
-        setStatus(ConnectionStatus.ERROR); 
-        setErrorMsg(err.message); 
-        setAudioLevel(0);
-      },
-      onAudioData: (level) => setAudioLevel(level),
-      onTurnComplete: () => setAudioLevel(0),
-      onTranscript: (text, role, isPartial) => {
-        setMessages(prev => {
-          const lastMsg = prev[prev.length - 1];
-          if (role === 'user') {
-             if (lastMsg && lastMsg.role === 'user' && lastMsg.isPartial) {
-                 const newMsgs = [...prev];
-                 newMsgs[newMsgs.length - 1] = { ...lastMsg, text: text, isPartial: isPartial };
-                 if (!isPartial && text === "") return prev; 
-                 return newMsgs;
-             } else if (text) {
-                 return [...prev, { id: Date.now().toString(), role, text, isPartial }];
-             }
-          } 
-          if (role === 'ai') {
-             if (lastMsg && lastMsg.role === 'ai') {
-                 const newMsgs = [...prev];
-                 newMsgs[newMsgs.length - 1] = { ...lastMsg, text: lastMsg.text + text };
-                 return newMsgs;
-             } else {
-                 return [...prev, { id: Date.now().toString(), role, text }];
-             }
+    try {
+        await liveClientRef.current.connect(scenario, {
+          onOpen: () => {
+              console.log("Connection Established (UI update)");
+              setStatus(ConnectionStatus.CONNECTED);
+              startTimeRef.current = Date.now();
+          },
+          onClose: () => { 
+            setStatus(prev => {
+                // Keep ERROR state if set, otherwise go to DISCONNECTED
+                return prev === ConnectionStatus.ERROR ? prev : ConnectionStatus.DISCONNECTED;
+            }); 
+            setAudioLevel(0);
+          },
+          onError: (err) => { 
+            console.error("Connection Error (UI):", err);
+            setStatus(ConnectionStatus.ERROR); 
+            setErrorMsg(err.message || "Connection failed. Please check console."); 
+            setAudioLevel(0);
+          },
+          onAudioData: (level) => setAudioLevel(level),
+          onTurnComplete: () => setAudioLevel(0),
+          onTranscript: (text, role, isPartial) => {
+            setMessages(prev => {
+              const lastMsg = prev[prev.length - 1];
+              if (role === 'user') {
+                 if (lastMsg && lastMsg.role === 'user' && lastMsg.isPartial) {
+                     const newMsgs = [...prev];
+                     newMsgs[newMsgs.length - 1] = { ...lastMsg, text: text, isPartial: isPartial };
+                     if (!isPartial && text === "") return prev; 
+                     return newMsgs;
+                 } else if (text) {
+                     return [...prev, { id: Date.now().toString(), role, text, isPartial }];
+                 }
+              } 
+              if (role === 'ai') {
+                 if (lastMsg && lastMsg.role === 'ai') {
+                     const newMsgs = [...prev];
+                     newMsgs[newMsgs.length - 1] = { ...lastMsg, text: lastMsg.text + text };
+                     return newMsgs;
+                 } else {
+                     return [...prev, { id: Date.now().toString(), role, text }];
+                 }
+              }
+              return prev;
+            });
+          },
+          onAssessment: (data) => {
+            setAssessment(data);
+            setStatus(ConnectionStatus.DISCONNECTED);
+            saveToSupabase(data);
+            liveClientRef.current?.disconnect();
           }
-          return prev;
-        });
-      },
-      onAssessment: (data) => {
-        setAssessment(data);
-        setStatus(ConnectionStatus.DISCONNECTED);
-        saveToSupabase(data);
-        liveClientRef.current?.disconnect();
-      }
-    }, difficulty); // Pass difficulty here
+        }, difficulty); 
+    } catch (err: any) {
+        console.error("Immediate Connection Failure:", err);
+        setStatus(ConnectionStatus.ERROR);
+        setErrorMsg(err.message || "Failed to initiate connection.");
+    }
   };
 
   const handleStop = async () => {
@@ -231,7 +271,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
           <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white animate-fade-in">
               <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mb-6"></div>
               <h2 className="text-2xl font-bold mb-2">Analyzing Performance</h2>
-              <p className="text-white/80 text-center max-w-xs">Generating ICAO Level 5 assessment report... This may take up to 20 seconds.</p>
+              <p className="text-white/80 text-center max-w-xs">Generating ICAO Level 5 assessment report... This may take up to 60 seconds.</p>
           </div>
       )}
 
@@ -241,6 +281,17 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
           data={assessment} 
           onClose={() => setAssessment(null)} 
         />
+      )}
+      
+      {/* History Modal */}
+      {showHistory && (
+          <HistoryModal 
+             onClose={() => setShowHistory(false)}
+             onSelectReport={(data) => {
+                 setAssessment(data);
+                 setShowHistory(false);
+             }}
+          />
       )}
 
       {/* Briefing Modal */}
@@ -266,8 +317,20 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
            <h1 className="text-2xl font-bold tracking-tight text-ios-text">Examiner</h1>
         </div>
         <div className="flex flex-col items-end">
-           <div className="bg-white/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-ios-border shadow-sm mb-1">
-              <span className="text-xs font-semibold text-ios-subtext">{difficulty}</span>
+           <div className="flex items-center space-x-2 mb-1">
+               <div className="bg-white/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-ios-border shadow-sm">
+                  <span className="text-xs font-semibold text-ios-subtext">{difficulty}</span>
+               </div>
+               
+               {/* History Button (Only visible when not in active call) */}
+               {status === ConnectionStatus.DISCONNECTED && (
+                  <button 
+                    onClick={() => setShowHistory(true)}
+                    className="p-1.5 bg-white/80 backdrop-blur-md rounded-full border border-ios-border shadow-sm text-gray-500 hover:text-gray-800 transition-colors"
+                  >
+                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  </button>
+               )}
            </div>
            <button 
              onClick={togglePtt}
