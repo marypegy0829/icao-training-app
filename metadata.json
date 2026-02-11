@@ -1,0 +1,7 @@
+{
+  "name": "ICAO Level 5 ATC Examiner",
+  "description": "A realistic AI-driven aviation English examination simulator focusing on ICAO Level 5 standards (Emergency & Non-routine situations).",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
