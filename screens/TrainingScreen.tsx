@@ -37,6 +37,13 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
   // Session State
   const [activeScenario, setActiveScenario] = useState<Scenario | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
+  
+  // NEW: Track status in ref to avoid closure staleness and TS type narrowing issues in callbacks
+  const statusRef = useRef<ConnectionStatus>(status);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -142,7 +149,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
           activeScenario.title,
           activeScenario.phase || 'General',
           finalAssessment,
-          durationSeconds
+          durationSeconds,
+          'TRAINING' // Explicitly mark as Training
       );
   };
 
@@ -193,11 +201,16 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
           startTimeRef.current = Date.now(); // Reset start time on actual connection
       },
       onClose: () => {
-         setStatus(ConnectionStatus.DISCONNECTED);
-         if (status !== ConnectionStatus.ERROR) {
-             // If closed cleanly without assessment (e.g. manual abort), don't show report
-             if (!assessment) setView('dashboard'); 
+         // CRITICAL FIX: Same logic as AssessmentScreen.
+         // If we are ANALYZING, do NOT go back to dashboard. Wait for assessment data.
+         // Use statusRef to reliably check status without TS overlap errors in setState callback
+         if (statusRef.current === ConnectionStatus.ANALYZING) {
+             return;
          }
+         
+         // If manual close or error, go back to dashboard
+         setView('dashboard');
+         setStatus(ConnectionStatus.DISCONNECTED);
       },
       onError: (err) => {
           setStatus(ConnectionStatus.ERROR);
@@ -234,9 +247,15 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
           });
       },
       onAssessment: (data) => {
+          // 1. Save data
           setAssessment(data);
-          setStatus(ConnectionStatus.DISCONNECTED);
           saveToSupabase(data);
+          
+          // 2. Stop spinner (set to DISCONNECTED), but DO NOT setView('dashboard') yet.
+          // The AssessmentReport modal will overlay the current session view.
+          setStatus(ConnectionStatus.DISCONNECTED);
+          
+          // 3. Clean up socket
           liveClientRef.current?.disconnect();
       }
     }, difficulty, coachingInstruction);
@@ -301,20 +320,25 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
           <div className="h-full overflow-y-auto bg-ios-bg pb-20 relative">
               
               {/* Header */}
-              <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex justify-between items-start">
+              <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex justify-between items-center">
                   <div>
                       <h1 className="text-2xl font-bold text-ios-text">专项训练</h1>
-                      <p className="text-sm text-ios-subtext">针对性强化飞行特情通话能力</p>
-                      <div className="mt-2 text-[10px] font-bold text-ios-blue bg-blue-50 inline-block px-2 py-0.5 rounded border border-blue-100 uppercase">
-                          Current Difficulty: {difficulty}
+                      <div className="flex items-center space-x-2 mt-1">
+                          <p className="text-sm text-ios-subtext">针对性强化飞行特情通话能力</p>
+                          <div className="text-[10px] font-bold text-ios-blue bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase">
+                            Diff: {difficulty}
+                          </div>
                       </div>
                   </div>
-                  {/* History Button */}
+                  {/* PROMINENT HISTORY REPORT BUTTON */}
                   <button 
                     onClick={() => setShowHistory(true)}
-                    className="p-2 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200 transition-colors"
+                    className="flex items-center space-x-1.5 bg-gradient-to-r from-ios-blue to-ios-indigo text-white px-4 py-2 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all active:scale-95"
                   >
-                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                     </svg>
+                     <span className="text-sm font-bold">历史报告</span>
                   </button>
               </div>
 
@@ -448,6 +472,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                <button 
                  onClick={() => {
                      liveClientRef.current?.disconnect();
+                     // Here we can safely go to dashboard because it's a user manual abort
                      setView('dashboard');
                  }} 
                  className="flex items-center text-ios-blue hover:text-ios-blue/80 transition-colors"
@@ -571,6 +596,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
           data={assessment} 
           onClose={() => {
               setAssessment(null);
+              // CRITICAL: Only when user closes the report, we go back to dashboard.
               setView('dashboard');
           }} 
         />

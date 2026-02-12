@@ -1,5 +1,6 @@
+
 import React, { useEffect, useState } from 'react';
-import { Scenario } from '../types';
+import { Scenario, FlightPhase } from '../types';
 
 interface Props {
   active: boolean;
@@ -9,6 +10,26 @@ interface Props {
 const CockpitDisplay: React.FC<Props> = ({ active, scenario }) => {
   const [elapsed, setElapsed] = useState(0);
 
+  // Helper to determine Frequency and Station Name based on Phase
+  const getCommsData = (phase?: FlightPhase) => {
+      switch (phase) {
+          case 'Ground Ops':
+              return { freq: '121.900', name: 'GROUND' };
+          case 'Takeoff & Climb':
+          case 'Landing & Taxi in':
+              return { freq: '118.500', name: 'TOWER' };
+          case 'Descent & Approach':
+          case 'Go-around & Diversion':
+              return { freq: '119.700', name: 'APPROACH' };
+          case 'Cruise & Enroute':
+              return { freq: '132.800', name: 'CONTROL' };
+          default:
+              return { freq: '118.500', name: 'TOWER' };
+      }
+  };
+
+  const comms = getCommsData(scenario?.phase);
+
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
     if (active) {
@@ -17,9 +38,7 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario }) => {
         setElapsed(Date.now() - startTime);
       }, 1000);
     } else if (!active && elapsed !== 0) {
-      // Do not reset immediately on pause, but for this app disconnected means stop
-      // We might want to keep the final time visible, but for now let's reset on full disconnect or handle in parent
-      // Actually, let's just reset when scenario is null
+      // Do not reset immediately on pause
     }
 
     if (!scenario) setElapsed(0);
@@ -40,14 +59,14 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario }) => {
     <div className="grid grid-cols-3 gap-3 w-full max-w-2xl mx-auto">
       
       {/* Widget 1: COMMS */}
-      <div className="bg-ios-surface/80 backdrop-blur-md rounded-2xl p-3 flex flex-col justify-between h-24 border border-ios-border shadow-soft">
+      <div className="bg-ios-surface/80 backdrop-blur-md rounded-2xl p-3 flex flex-col justify-between h-24 border border-ios-border shadow-soft transition-all duration-500">
         <div className="flex justify-between items-center">
              <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-wider">COM 1</span>
              <div className={`w-2 h-2 rounded-full ${active ? 'bg-ios-blue shadow-glow' : 'bg-gray-300'}`}></div>
         </div>
         <div>
-          <div className="text-xl font-bold font-mono text-ios-text tracking-tight">118.500</div>
-          <span className="text-[10px] text-ios-subtext font-medium">TOWER</span>
+          <div className="text-xl font-bold font-mono text-ios-text tracking-tight tabular-nums">{comms.freq}</div>
+          <span className="text-[10px] text-ios-subtext font-medium">{comms.name}</span>
         </div>
       </div>
 
@@ -56,15 +75,19 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario }) => {
          {scenario ? (
              <>
                 <div className="flex justify-between items-start z-10">
-                    <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-wider">Scenario: {scenario.title}</span>
+                    <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-wider truncate max-w-[120px]">
+                        {scenario.phase || 'Scenario'}
+                    </span>
                     <span className="font-mono text-base font-bold text-ios-text">{formatTime(elapsed)}</span>
                 </div>
                 <div className="flex items-end justify-between mt-1 z-10 h-full">
-                    <div className="flex flex-col">
+                    <div className="flex flex-col overflow-hidden mr-2">
                         <span className="text-[10px] font-bold text-ios-subtext">Weather</span>
-                        <span className="text-xs font-medium text-ios-text truncate max-w-[200px]">{scenario.weather}</span>
+                        <span className="text-xs font-medium text-ios-text truncate block w-full" title={scenario.weather}>
+                            {scenario.weather}
+                        </span>
                     </div>
-                    <div className="flex flex-col items-end">
+                    <div className="flex flex-col items-end shrink-0">
                         <span className="text-[10px] font-bold text-ios-subtext">Callsign</span>
                         <span className="text-sm font-bold text-ios-orange">{scenario.callsign}</span>
                     </div>

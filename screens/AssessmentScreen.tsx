@@ -124,13 +124,15 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
 
   const saveToSupabase = async (finalAssessment: AssessmentData | null) => {
       if (!scenario) return;
+      console.log("Saving session to history...", finalAssessment ? "With Report" : "No Report");
       const durationSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
       
       await userService.saveSession(
           scenario.title,
           scenario.phase || 'Assessment',
           finalAssessment,
-          durationSeconds
+          durationSeconds,
+          'ASSESSMENT' // Explicitly mark as Assessment
       );
   };
 
@@ -167,6 +169,10 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
           },
           onClose: () => { 
             setStatus(prev => {
+                // CRITICAL FIX: If we are ANALYZING, do NOT switch to disconnected yet.
+                // Wait for the assessment report to handle the transition.
+                if (prev === ConnectionStatus.ANALYZING) return prev;
+                
                 // Keep ERROR state if set, otherwise go to DISCONNECTED
                 return prev === ConnectionStatus.ERROR ? prev : ConnectionStatus.DISCONNECTED;
             }); 
@@ -206,10 +212,21 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
             });
           },
           onAssessment: (data) => {
+            console.log("Assessment Received:", data);
+            
+            // 1. Set Data immediately so Modal can mount
             setAssessment(data);
-            setStatus(ConnectionStatus.DISCONNECTED);
+            
+            // 2. Save to History (Background)
             saveToSupabase(data);
-            liveClientRef.current?.disconnect();
+            
+            // 3. Smooth Transition: 
+            // Keep "Analyzing" spinner for a split second while Modal animates in,
+            // then switch underlying status to DISCONNECTED.
+            setTimeout(() => {
+                setStatus(ConnectionStatus.DISCONNECTED);
+                liveClientRef.current?.disconnect();
+            }, 500);
           }
         }, difficulty); 
     } catch (err: any) {
@@ -266,16 +283,25 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   return (
     <div className="h-full w-full relative flex flex-col bg-ios-bg overflow-hidden text-ios-text font-sans">
       
-      {/* Loading Overlay */}
+      {/* Loading Overlay with Transition */}
       {status === ConnectionStatus.ANALYZING && (
           <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white animate-fade-in">
-              <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mb-6"></div>
-              <h2 className="text-2xl font-bold mb-2">Analyzing Performance</h2>
-              <p className="text-white/80 text-center max-w-xs">Generating ICAO Level 5 assessment report... This may take up to 60 seconds.</p>
+              <div className="relative">
+                  <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                     <span className="text-xs font-bold animate-pulse">AI</span>
+                  </div>
+              </div>
+              <h2 className="text-2xl font-bold mt-6 mb-2">Analyzing Performance</h2>
+              <div className="flex flex-col space-y-1 text-center text-sm text-white/80">
+                  <p>Processing linguistic patterns...</p>
+                  <p>Evaluating ICAO compliance...</p>
+                  <p>Generating report...</p>
+              </div>
           </div>
       )}
 
-      {/* Assessment Modal */}
+      {/* Assessment Modal - Renders on top */}
       {assessment && (
         <AssessmentReport 
           data={assessment} 
@@ -326,9 +352,12 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                {status === ConnectionStatus.DISCONNECTED && (
                   <button 
                     onClick={() => setShowHistory(true)}
-                    className="p-1.5 bg-white/80 backdrop-blur-md rounded-full border border-ios-border shadow-sm text-gray-500 hover:text-gray-800 transition-colors"
+                    className="flex items-center space-x-1.5 bg-gradient-to-r from-ios-blue to-ios-indigo text-white px-3 py-1.5 rounded-full shadow-md hover:shadow-lg hover:scale-105 transition-all active:scale-95"
                   >
-                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                     </svg>
+                     <span className="text-xs font-bold">历史报告</span>
                   </button>
                )}
            </div>
@@ -422,7 +451,10 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                 className={`${isPttEnabled ? 'w-14' : 'flex-1'} h-12 rounded-full border border-ios-border bg-white text-ios-red shadow-soft hover:bg-red-50 active:scale-95 transition-all flex items-center justify-center`}
              >
                 {status === ConnectionStatus.ANALYZING ? (
-                   <div className="animate-spin w-5 h-5 border-2 border-gray-300 border-t-ios-red rounded-full"></div>
+                   <div className="flex items-center space-x-2">
+                      <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-ios-red rounded-full"></div>
+                      <span className="text-xs font-bold text-ios-red">Generating...</span>
+                   </div>
                 ) : (
                    isPttEnabled ? (
                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>

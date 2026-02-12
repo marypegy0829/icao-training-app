@@ -24,6 +24,8 @@ export interface UserProfile {
     skills: Skills;
 }
 
+export type SessionType = 'TRAINING' | 'ASSESSMENT';
+
 export const userService = {
     // Get current authenticated user ID
     async getCurrentUserId(): Promise<string | null> {
@@ -82,11 +84,12 @@ export const userService = {
         return newProfile;
     },
 
-    // Fetch training logs
+    // Fetch test reports (History)
     async getHistory() {
         const uid = await this.getCurrentUserId();
         if (!uid) return [];
 
+        // Corrected table name to match SQL setup: 'training_logs'
         const { data, error } = await supabase
             .from('training_logs')
             .select('*')
@@ -100,12 +103,13 @@ export const userService = {
         return data;
     },
 
-    // Save a new training log and update stats
+    // Save a new test report and update stats
     async saveSession(
         scenarioTitle: string, 
         phase: string, 
         assessment: AssessmentData | null, 
-        durationSeconds: number
+        durationSeconds: number,
+        sessionType: SessionType = 'TRAINING' // New parameter
     ) {
         const uid = await this.getCurrentUserId();
         if (!uid) return;
@@ -113,7 +117,7 @@ export const userService = {
         const durationStr = `${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`;
         const score = assessment ? assessment.overallScore : 0;
 
-        // 1. Insert Log
+        // 1. Insert Report into 'training_logs'
         const { error: logError } = await supabase
             .from('training_logs')
             .insert({
@@ -122,11 +126,12 @@ export const userService = {
                 phase: phase,
                 score: score,
                 duration: durationStr,
-                duration_seconds: durationSeconds, // Added for robust analytics
+                duration_seconds: durationSeconds,
+                session_type: sessionType, // Store the type
                 details: assessment
             });
 
-        if (logError) console.error('Error saving log:', logError);
+        if (logError) console.error('Error saving report:', logError);
 
         // 2. Update Profile Stats
         const currentProfile = await this.getProfile();
@@ -158,7 +163,6 @@ export const userService = {
                 .update({
                     flight_hours: Number(currentProfile.flight_hours || 0) + flightTimeHours,
                     total_sorties: (currentProfile.total_sorties || 0) + 1,
-                    // Note: Basic streak logic. In a robust app, this would be calculated via DB trigger or CRON based on last_active_date.
                     streak: (currentProfile.streak || 0) + 1, 
                     skills: newSkills
                 })

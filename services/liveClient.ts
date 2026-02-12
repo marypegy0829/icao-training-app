@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type, Tool, Schema } from '@google/genai';
-import { base64ToBytes, decodeAudioData } from './audioUtils';
+import { base64ToBytes, decodeAudioData, downsampleTo16k } from './audioUtils';
 import { AssessmentData, Scenario, DifficultyLevel } from '../types';
 
 interface LiveClientCallbacks {
@@ -13,17 +12,24 @@ interface LiveClientCallbacks {
   onAssessment: (data: AssessmentData) => void;
 }
 
+// Helper to handle loose types (string numbers) and clamp values
+function parseScore(val: any): number {
+    const num = Number(val);
+    if (isNaN(num)) return 1;
+    return Math.max(1, Math.min(6, Math.round(num)));
+}
+
 // Helper to safely parse and default the assessment data to avoid runtime crashes
 function safeParseAssessment(data: any): AssessmentData {
-    // defaults
+    // Robustly parse scores even if they come as strings
     return {
-        overallScore: typeof data.overallScore === 'number' ? data.overallScore : 1,
-        pronunciation: typeof data.pronunciation === 'number' ? data.pronunciation : 1,
-        structure: typeof data.structure === 'number' ? data.structure : 1,
-        vocabulary: typeof data.vocabulary === 'number' ? data.vocabulary : 1,
-        fluency: typeof data.fluency === 'number' ? data.fluency : 1,
-        comprehension: typeof data.comprehension === 'number' ? data.comprehension : 1,
-        interactions: typeof data.interactions === 'number' ? data.interactions : 1,
+        overallScore: parseScore(data.overallScore),
+        pronunciation: parseScore(data.pronunciation),
+        structure: parseScore(data.structure),
+        vocabulary: parseScore(data.vocabulary),
+        fluency: parseScore(data.fluency),
+        comprehension: parseScore(data.comprehension),
+        interactions: parseScore(data.interactions),
         
         executiveSummary: data.executiveSummary || { 
             assessment: "Data missing from AI response.", 
@@ -48,13 +54,13 @@ function safeParseAssessment(data: any): AssessmentData {
 const assessmentSchema: Schema = {
   type: Type.OBJECT,
   properties: {
-    overallScore: { type: Type.NUMBER, description: "Overall ICAO Level (1-6)." },
-    pronunciation: { type: Type.NUMBER, description: "Score (1-6) for Pronunciation." },
-    structure: { type: Type.NUMBER, description: "Score (1-6) for Structure." },
-    vocabulary: { type: Type.NUMBER, description: "Score (1-6) for Vocabulary." },
-    fluency: { type: Type.NUMBER, description: "Score (1-6) for Fluency." },
-    comprehension: { type: Type.NUMBER, description: "Score (1-6) for Comprehension." },
-    interactions: { type: Type.NUMBER, description: "Score (1-6) for Interactions." },
+    overallScore: { type: Type.NUMBER, description: "Overall ICAO Level (Integer 1-6)." },
+    pronunciation: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
+    structure: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
+    vocabulary: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
+    fluency: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
+    comprehension: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
+    interactions: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
     
     executiveSummary: {
       type: Type.OBJECT,
@@ -81,14 +87,14 @@ const assessmentSchema: Schema = {
 
     deepAnalysis: {
       type: Type.ARRAY,
-      description: "List of 3-5 critical linguistic errors found in the transcript.",
+      description: "List of 3-5 specific errors found in the transcript. MUST cite exact user words.",
       items: {
         type: Type.OBJECT,
         properties: {
-          context: { type: Type.STRING, description: "The exact quote from the user causing the error." },
-          issue: { type: Type.STRING, description: "Description of the error (Chinese)." },
-          theory: { type: Type.STRING, description: "Linguistic or ICAO principle violated (Chinese). Make it educational." },
-          rootCause: { type: Type.STRING, description: "Likely cause (e.g. L1 interference, lack of knowledge) (Chinese)." },
+          context: { type: Type.STRING, description: "The EXACT quote from the 'User' in the transcript that contains the error." },
+          issue: { type: Type.STRING, description: "Identify the error type (e.g., [STRUCTURE] Wrong preposition, [PRONUNCIATION] Mispronounced 'Altimeter')." },
+          theory: { type: Type.STRING, description: "Explain WHY it is wrong based on ICAO Doc 9835 (Chinese)." },
+          rootCause: { type: Type.STRING, description: "Likely cause (L1 interference, lack of practice) (Chinese)." },
           correction: { type: Type.STRING, description: "The correct standard phraseology or sentence (English)." }
         },
         required: ["context", "issue", "theory", "rootCause", "correction"]
@@ -124,7 +130,11 @@ export class LiveClient {
   private processor: ScriptProcessorNode | null = null;
   private inputSource: MediaStreamAudioSourceNode | null = null;
   private isInputMuted: boolean = false;
-  private fullTranscript: string = ""; // Accumulate transcript for context
+  
+  // Transcript State
+  private fullTranscript: string = ""; 
+  private currentInputPart: string = ""; // Buffer for streaming input
+  
   private currentCallbacks: LiveClientCallbacks | null = null;
   private scenarioContext: Scenario | null = null;
 
@@ -183,12 +193,17 @@ export class LiveClient {
     this.currentCallbacks = callbacks;
     this.scenarioContext = scenario;
     this.fullTranscript = "";
+    this.currentInputPart = "";
 
     // 2. Initialize Audio Contexts
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     
     try {
-        this.inputAudioContext = new AudioContextClass({ sampleRate: 16000 });
+        // We let the system choose the sample rate (usually 44100 or 48000)
+        // We will downsample manually to 16000 before sending to Gemini
+        this.inputAudioContext = new AudioContextClass();
+        
+        // Output context for playback (can be higher quality)
         this.outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
     } catch (e) {
         console.warn("Failed to suggest sample rate, falling back to default", e);
@@ -208,7 +223,7 @@ export class LiveClient {
             autoGainControl: true
         }
       });
-      console.log("Microphone access granted. Input Sample Rate:", this.inputAudioContext.sampleRate);
+      console.log("Microphone access granted. Native Sample Rate:", this.inputAudioContext.sampleRate);
     } catch (err) {
       console.error("Audio Access Error:", err);
       callbacks.onError(new Error("Microphone permission denied. Please allow access in settings."));
@@ -319,20 +334,33 @@ export class LiveClient {
                 this.sources.add(source);
               }
 
-              // Handle Transcripts
+              // --- ROBUST TRANSCRIPT HANDLING ---
+              // User Transcript: Buffer it, don't commit to fullTranscript yet to avoid duplication
               const inputTranscript = message.serverContent?.inputTranscription?.text;
               if (inputTranscript) {
-                  this.fullTranscript += `User: ${inputTranscript}\n`;
+                  this.currentInputPart += inputTranscript; 
                   callbacks.onTranscript(inputTranscript, 'user', true);
               }
 
+              // AI Transcript: Commit buffered user text, then append AI text
               const outputTranscript = message.serverContent?.outputTranscription?.text;
               if (outputTranscript) {
+                  // If we have pending user input, commit it now
+                  if (this.currentInputPart.trim()) {
+                      this.fullTranscript += `User: ${this.currentInputPart.trim()}\n`;
+                      this.currentInputPart = "";
+                  }
+                  
                   this.fullTranscript += `ATC: ${outputTranscript}\n`;
                   callbacks.onTranscript(outputTranscript, 'ai', false);
               }
 
+              // Turn Complete: Flush any remaining user input buffer
               if (message.serverContent?.turnComplete) {
+                if (this.currentInputPart.trim()) {
+                    this.fullTranscript += `User: ${this.currentInputPart.trim()}\n`;
+                    this.currentInputPart = "";
+                }
                 callbacks.onTurnComplete();
                 callbacks.onTranscript("", 'user', false);
               }
@@ -352,22 +380,19 @@ export class LiveClient {
             speechConfig: {
               voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
             },
+            // CRITICAL FIX: Enable Transcription
+            inputAudioTranscription: {}, 
+            outputAudioTranscription: {},
             systemInstruction: finalInstruction,
             tools: tools,
           },
         });
 
-        const session = await this.sessionPromise;
+        // Initialize session promise
+        await this.sessionPromise;
         this.startAudioInputStream();
         
-        // Kickstart message
-        try {
-            if (typeof session.send === 'function') {
-                await session.send({ parts: [{ text: "Simulation Started. I am ready." }] });
-            }
-        } catch (kickstartError) {
-            console.warn("Kickstart message skipped (optional).");
-        }
+        // Removed Kickstart message to prevent Race Condition / Network Error
 
     } catch (e: any) {
         console.error("Failed to initialize session:", e);
@@ -381,14 +406,19 @@ export class LiveClient {
     this.inputSource = this.inputAudioContext.createMediaStreamSource(this.stream);
     this.processor = this.inputAudioContext.createScriptProcessor(4096, 1, 1);
 
-    const actualSampleRate = this.inputAudioContext.sampleRate;
-    const mimeType = `audio/pcm;rate=${actualSampleRate}`;
+    const currentSampleRate = this.inputAudioContext.sampleRate;
+    // We will downsample to 16k, so sending as 16k
+    const mimeType = 'audio/pcm;rate=16000';
 
     this.processor.onaudioprocess = (e) => {
       if (this.isInputMuted) return;
 
       const inputData = e.inputBuffer.getChannelData(0);
-      const base64Data = this.float32ToBase64(inputData);
+      
+      // CRITICAL FIX: Downsample audio to 16kHz before sending
+      const downsampledData = downsampleTo16k(inputData, currentSampleRate);
+      
+      const base64Data = this.float32ToBase64(downsampledData);
       
       this.sessionPromise?.then((session) => {
         if (typeof session.sendRealtimeInput === 'function') {
@@ -422,22 +452,39 @@ export class LiveClient {
   }
 
   // --- NEW FINALIZE STRATEGY ---
-  // Instead of relying on the Live Session to generate the report (which fails if send() is missing),
-  // we disconnect the session and use a dedicated Text Model (Gemini 3 Flash) to process the transcript.
   async finalize() {
     console.log("Finalizing session...");
     
-    // 1. Disconnect immediately to stop audio processing
+    // CRITICAL FIX 1: Race Condition Prevention
+    // Stop sending new audio, but keep connection open to receive final transcription.
+    this.setInputMuted(true); 
+    
+    console.log("Waiting for trailing transcripts (buffer period)...");
+    await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second buffer
+
+    // Flush any remaining input buffer before disconnecting
+    if (this.currentInputPart.trim()) {
+        this.fullTranscript += `User: ${this.currentInputPart.trim()}\n`;
+        this.currentInputPart = "";
+    }
+
+    // 1. Now we can disconnect safely
     await this.disconnect();
 
     // 2. Generate Report using standard GenerateContent API
     if (this.currentCallbacks && this.ai) {
-        if (!this.fullTranscript.trim()) {
-            console.warn("No transcript available for assessment.");
-             // Return empty/fail assessment
+        console.log("Full Transcript for Assessment:", this.fullTranscript);
+
+        // CRITICAL FIX 3: Empty Transcript Protection
+        if (!this.fullTranscript.trim() || this.fullTranscript.length < 15) {
+             console.warn("Transcript too short for assessment.");
              this.currentCallbacks.onAssessment(safeParseAssessment({
                  overallScore: 1,
-                 executiveSummary: { assessment: "No audio detected.", safetyMargin: "N/A", frictionPoints: "N/A" }
+                 executiveSummary: { 
+                     assessment: "Audio processing error: No valid speech detected. This may be due to microphone permissions, network issues, or the session was too short.", 
+                     safetyMargin: "N/A", 
+                     frictionPoints: "No audio received." 
+                 }
              }));
             return;
         }
@@ -446,22 +493,51 @@ export class LiveClient {
             console.log("Generating assessment report using Gemini 3 Flash...");
             const model = this.ai.models;
             
-            // Construct the prompt for the text model
+            // CRITICAL FIX 2: Ground Truth Injection
+            // We explicitely tell the AI what SHOULD have happened vs what ACTUALLY happened.
             const prompt = `
-            # ICAO ENGLISH ASSESSMENT TASK (Strict JSON Output)
-            Based on the following transcript of a radiotelephony simulation, generate a detailed ICAO Level 5 assessment report.
+            # ROLE: ICAO English Master Examiner
+            # TASK: Assess the following radiotelephony transcript and generate a JSON report.
             
-            SCENARIO: ${this.scenarioContext?.title}
+            # SCENARIO CONTEXT (THE "GROUND TRUTH"):
+            - Scenario Title: ${this.scenarioContext?.title}
+            - Situation Details: ${this.scenarioContext?.details}
+            - Weather Conditions: ${this.scenarioContext?.weather}
+            - Callsign: ${this.scenarioContext?.callsign}
+            - Flight Phase: ${this.scenarioContext?.phase}
             
-            TRANSCRIPT:
+            # TRANSCRIPT (ACTUAL PERFORMANCE):
             ${this.fullTranscript}
             
-            REQUIREMENTS:
-            1. ACT AS A SENIOR EXAMINER. Be strict but educational.
-            2. JSON Output ONLY. Follow the schema exactly.
-            3. All text fields MUST be in SIMPLIFIED CHINESE (简体中文), except for specific English quotes or corrections.
-            4. In 'deepAnalysis', identify REAL errors (e.g. missing readback, wrong preposition, stuttering, non-standard phraseology). 
-            5. If performance was perfect, nitpick on minor fluency or pronunciation issues to provide value.
+            # ASSESSMENT GUIDELINES:
+            1. **FACTUAL ACCURACY CHECK (CRITICAL)**: 
+               - Compare the transcript against the SCENARIO CONTEXT.
+               - Did the pilot correctly read back numbers (headings, altitudes, QNH)? 
+               - Did they follow the specific instructions implied by the scenario?
+               - **RULE:** If the pilot made a factual error (e.g., wrong turn direction, wrong altitude) that affects safety, the score MUST be 3 or lower, regardless of grammar.
+               
+            2. **FORENSIC LINGUISTICS**: 
+               - Quote specific words the user said in the 'deepAnalysis' section.
+            
+            3. **SCORING**: Use the ICAO holistic descriptors (1-6).
+               - Level 6: Native-like, nuance, no errors.
+               - Level 4: Operational, some errors but safe.
+               - Level 3: Frequent errors, misunderstandings, safety risk.
+            
+            # DEEP ANALYSIS INSTRUCTIONS:
+            - Identify 3-5 specific moments where the user's speech could be improved.
+            - CATEGORIZE EACH ERROR: [STRUCTURE], [PRONUNCIATION], [VOCABULARY], [FLUENCY], [COMPREHENSION-FACTUAL].
+            - Example:
+              {
+                "context": "User: Turning right heading 180.",
+                "issue": "[COMPREHENSION-FACTUAL] Wrong direction",
+                "correction": "Turn left heading 180",
+                "theory": "User failed to comprehend the directional instruction from ATC, posing a collision risk."
+              }
+            
+            # JSON FORMAT:
+            - Strict JSON. No markdown code blocks.
+            - All explanations in SIMPLIFIED CHINESE (简体中文).
             `;
 
             // Use Gemini 3 Flash for high quality reasoning and JSON generation

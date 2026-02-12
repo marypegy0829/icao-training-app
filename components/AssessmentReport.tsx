@@ -194,7 +194,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
              </div>
           </section>
 
-          {/* 4. Deep Analysis (Page Break for Print) */}
+          {/* 4. Deep Analysis (Improved Diff View) */}
           <section className="break-inside-avoid page-break">
              <div className="flex items-center space-x-3 mb-6 border-b border-gray-100 pb-3">
                 <div className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center">
@@ -210,44 +210,61 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                      <div className="text-sm opacity-80">No critical linguistic errors detected in this session.</div>
                  </div>
              ) : (
-                 <div className="grid grid-cols-1 gap-4">
+                 <div className="space-y-4">
                     {data.deepAnalysis.map((item, idx) => (
-                        <div key={idx} className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:border-ios-blue transition-colors group">
-                            <div className="flex flex-col md:flex-row gap-6">
-                                {/* Left: Context */}
-                                <div className="md:w-1/3">
-                                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Transcript Context (原文)</div>
-                                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 text-sm font-mono text-gray-700 leading-relaxed group-hover:bg-blue-50/30 transition-colors">
-                                        "{item.context}"
-                                    </div>
+                        <div key={idx} className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm hover:border-ios-blue transition-colors group">
+                            
+                            {/* Header: Issue Type & Description */}
+                            <div className="bg-gray-50/50 px-5 py-3 border-b border-gray-100 flex justify-between items-center">
+                                <div className="flex items-center space-x-2">
+                                    <span className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded uppercase">Issue {idx + 1}</span>
+                                    <span className="text-sm font-bold text-gray-800">{item.issue}</span>
                                 </div>
+                            </div>
 
-                                {/* Right: Analysis */}
-                                <div className="md:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    {/* Issue */}
-                                    <div>
-                                        <div className="text-[10px] font-bold text-red-500 uppercase tracking-wider mb-1">Issue Identified (错误)</div>
-                                        <div className="text-sm font-bold text-gray-900 mb-2">{item.issue}</div>
-                                        <div className="bg-red-50 p-2 rounded-lg border border-red-100 text-xs text-red-800 italic">
-                                            <span className="font-bold not-italic mr-1">Theory:</span>
-                                            {item.theory}
+                            <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+                                
+                                {/* Left: Comparison (The "Diff") */}
+                                <div className="space-y-3">
+                                    {/* User's Original Input */}
+                                    <div className="relative">
+                                        <div className="absolute left-0 top-3 bottom-3 w-1 bg-red-400 rounded-full"></div>
+                                        <div className="pl-4">
+                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">You Said</div>
+                                            <div className="bg-red-50 text-red-900 p-3 rounded-lg text-sm font-mono leading-relaxed border border-red-100">
+                                                "{item.context}"
+                                            </div>
                                         </div>
                                     </div>
-                                    
-                                    {/* Correction & Root Cause */}
-                                    <div className="flex flex-col justify-between">
-                                        <div>
-                                            <div className="text-[10px] font-bold text-green-600 uppercase tracking-wider mb-1">Correction (建议修正)</div>
-                                            <div className="text-sm font-mono text-green-700 font-medium bg-green-50 px-2 py-1 rounded border border-green-100 inline-block mb-3">
+
+                                    {/* Correction */}
+                                    <div className="relative">
+                                        <div className="absolute left-0 top-3 bottom-3 w-1 bg-green-500 rounded-full"></div>
+                                        <div className="pl-4">
+                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Better / Standard</div>
+                                            <div className="bg-green-50 text-green-800 p-3 rounded-lg text-sm font-mono leading-relaxed border border-green-100 font-semibold">
                                                 {item.correction}
                                             </div>
                                         </div>
-                                        <div>
-                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Root Cause (根源)</div>
-                                            <div className="text-xs text-gray-600 font-medium">{item.rootCause}</div>
-                                        </div>
                                     </div>
                                 </div>
+
+                                {/* Right: Explanation */}
+                                <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col justify-center">
+                                     <div className="mb-3">
+                                         <div className="text-[10px] font-bold text-ios-blue uppercase tracking-wider mb-1">ICAO Principle</div>
+                                         <p className="text-xs text-gray-600 leading-relaxed italic">
+                                             {item.theory}
+                                         </p>
+                                     </div>
+                                     <div>
+                                         <div className="text-[10px] font-bold text-orange-500 uppercase tracking-wider mb-1">Root Cause</div>
+                                         <p className="text-xs text-gray-800 font-medium">
+                                             {item.rootCause}
+                                         </p>
+                                     </div>
+                                </div>
+
                             </div>
                         </div>
                     ))}
