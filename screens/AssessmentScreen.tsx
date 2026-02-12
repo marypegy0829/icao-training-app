@@ -149,6 +149,12 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
      setStatus(ConnectionStatus.BRIEFING);
      setErrorMsg(null);
   };
+  
+  // Handler for Refreshing Scenario within Briefing Modal
+  const handleRefreshScenario = () => {
+      const s = getRandomAssessmentScenario();
+      setScenario(s);
+  };
 
   // Re-connect logic without changing scenario
   const handleReconnect = async () => {
@@ -334,6 +340,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             scenario={scenario} 
             onAccept={handleConnect}
             onCancel={() => setStatus(ConnectionStatus.DISCONNECTED)}
+            onRefresh={handleRefreshScenario}
         />
       )}
 
@@ -389,7 +396,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
 
         {/* Lower: Transcript */}
         <div className="flex-1 flex flex-col bg-white/50 backdrop-blur-lg border-t border-white/20 rounded-t-[2.5rem] shadow-soft overflow-hidden mx-2 relative">
-            <div className="px-6 py-3 border-b border-black/5 flex justify-between items-center">
+            <div className="px-6 py-3 border-b border-black/5 flex justify-between items-center bg-white/40 backdrop-blur-md z-20">
                 <span className="text-xs font-semibold text-ios-subtext">实时对话记录 (Live Transcript)</span>
                 {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">正在连接...</span>}
                 {/* Show Current Airport Code */}
@@ -399,6 +406,25 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     </span>
                 )}
             </div>
+            
+            {/* NEW: Pinned Situation Box */}
+            {scenario && (
+              <div className="px-6 py-3 bg-yellow-50/80 backdrop-blur-sm border-b border-yellow-100/50 z-10 shrink-0 shadow-sm transition-all animate-fade-in">
+                  <div className="flex items-start space-x-2">
+                      <div className="mt-0.5 shrink-0 bg-yellow-100 text-yellow-600 rounded-md p-1">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                          <span className="text-[10px] font-bold text-yellow-600 uppercase tracking-wider block mb-0.5">SITUATION</span>
+                          <p className="text-xs text-yellow-900/90 leading-relaxed font-medium line-clamp-3">
+                              {scenario.details}
+                          </p>
+                      </div>
+                  </div>
+              </div>
+            )}
             
             {/* Error Overlay with Retry */}
             {status === ConnectionStatus.ERROR && errorMsg && (

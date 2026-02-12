@@ -369,29 +369,6 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                          <span className="text-sm font-bold">历史</span>
                       </button>
                   </div>
-
-                  {/* Airport Selection Input */}
-                  <div className="relative">
-                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                     </div>
-                     <input 
-                        type="text" 
-                        maxLength={4}
-                        placeholder="机场代码 (例如 ZBAA)" 
-                        className="w-full pl-10 pr-4 py-2 bg-gray-100 border-transparent focus:bg-white focus:border-ios-blue focus:ring-0 rounded-xl text-sm font-mono font-bold uppercase transition-colors"
-                        value={airportCode}
-                        onChange={(e) => setAirportCode(e.target.value.toUpperCase())}
-                     />
-                     {airportCode.length === 4 && (
-                         <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                             <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded">LOCALIZED</span>
-                         </div>
-                     )}
-                  </div>
               </div>
 
               {/* Recommended Section (Mock Logic) */}
@@ -417,6 +394,29 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
 
               {/* Filters */}
               <div className="px-6 mb-4">
+                  {/* Airport Selection Input */}
+                  <div className="relative mb-6">
+                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                     </div>
+                     <input 
+                        type="text" 
+                        maxLength={4}
+                        placeholder="机场代码 (例如 ZBAA)" 
+                        className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 focus:bg-white focus:border-ios-blue focus:ring-0 rounded-xl text-sm font-mono font-bold uppercase transition-colors shadow-sm"
+                        value={airportCode}
+                        onChange={(e) => setAirportCode(e.target.value.toUpperCase())}
+                     />
+                     {airportCode.length === 4 && (
+                         <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                             <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded">LOCALIZED</span>
+                         </div>
+                     )}
+                  </div>
+
                   <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3">飞行阶段 (Flight Phase)</h3>
                   
                   {/* Phase Selector */}

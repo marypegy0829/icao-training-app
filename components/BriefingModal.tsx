@@ -6,16 +6,27 @@ interface Props {
   scenario: Scenario;
   onAccept: (airportCode: string) => void;
   onCancel: () => void;
+  onRefresh?: () => void;
 }
 
-const BriefingModal: React.FC<Props> = ({ scenario, onAccept, onCancel }) => {
+const BriefingModal: React.FC<Props> = ({ scenario, onAccept, onCancel, onRefresh }) => {
   // Default to ZBAA or random, user can edit
   const [airportCode, setAirportCode] = useState('ZBAA');
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleStart = () => {
       // Basic validation: default to ZBAA if empty
       const code = airportCode.trim().length >= 3 ? airportCode.trim().toUpperCase() : 'ZBAA';
       onAccept(code);
+  };
+
+  const handleRefreshClick = () => {
+      if (onRefresh) {
+          setIsRefreshing(true);
+          onRefresh();
+          // Reset animation state after a short delay
+          setTimeout(() => setIsRefreshing(false), 500);
+      }
   };
 
   return (
@@ -65,8 +76,25 @@ const BriefingModal: React.FC<Props> = ({ scenario, onAccept, onCancel }) => {
             </div>
 
             <div>
-                <span className="block text-[10px] font-bold text-gray-400 uppercase mb-1">情境说明 (Situation)</span>
-                <p className="text-sm text-gray-600 leading-relaxed">
+                <div className="flex justify-between items-center mb-1">
+                    <span className="block text-[10px] font-bold text-gray-400 uppercase">情景说明 (Situation)</span>
+                    {onRefresh && (
+                        <button 
+                            onClick={handleRefreshClick}
+                            className="flex items-center space-x-1 text-[10px] font-bold text-ios-blue bg-blue-50 px-2 py-1 rounded-full hover:bg-blue-100 active:scale-95 transition-all"
+                            title="换一个场景"
+                        >
+                            <svg 
+                                className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} 
+                                fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span>更换</span>
+                        </button>
+                    )}
+                </div>
+                <p className="text-sm text-gray-600 leading-relaxed min-h-[60px]">
                     {scenario.details}
                 </p>
             </div>
