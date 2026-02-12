@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { LiveClient } from '../services/liveClient';
-import { TRAINING_SCENARIOS, SCENARIO_CATEGORIES, ScenarioCategory } from '../services/trainingData';
+import { SCENARIO_CATEGORIES, ScenarioCategory } from '../services/trainingData';
+import { scenarioService } from '../services/scenarioService'; // Use this service
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, FlightPhase, DifficultyLevel } from '../types';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
@@ -44,6 +45,10 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<ScenarioCategory | null>(null);
   const [airportCode, setAirportCode] = useState<string>(''); // NEW: Airport Code State
 
+  // Data State
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [loadingScenarios, setLoadingScenarios] = useState(true);
+
   // Session State
   const [activeScenario, setActiveScenario] = useState<Scenario | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
@@ -68,12 +73,6 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   // PTT State
   const [isPttEnabled, setIsPttEnabled] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
-
-  // History State (Mock) - In real app this would also be fetched
-  const [history] = useState([
-    { id: 1, title: 'Engine Fire on Departure', date: '2 hrs ago', score: 4 },
-    { id: 2, title: 'Complex Taxi Instructions', date: 'Yesterday', score: 5 },
-  ]);
 
   const liveClientRef = useRef<LiveClient | null>(null);
 
@@ -101,6 +100,15 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   // --- Effects for Session ---
 
   useEffect(() => {
+    // Load Scenarios
+    const loadScenarios = async () => {
+        setLoadingScenarios(true);
+        const data = await scenarioService.getAllScenarios();
+        setScenarios(data);
+        setLoadingScenarios(false);
+    };
+    loadScenarios();
+
     return () => {
       liveClientRef.current?.disconnect();
     };
@@ -338,7 +346,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
 
   const renderDashboard = () => {
       // Filter Scenarios
-      const filteredScenarios = TRAINING_SCENARIOS.filter(s => {
+      const filteredScenarios = scenarios.filter(s => {
           const matchCategory = selectedCategory ? s.category === selectedCategory : true;
           const matchPhase = selectedPhase ? s.phase === selectedPhase : true;
           return matchCategory && matchPhase;
@@ -371,7 +379,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                   </div>
               </div>
 
-              {/* Recommended Section (Mock Logic) */}
+              {/* Recommended Section (Mock Logic with DB fallback) */}
               <div className="px-6 py-6">
                   <div className="bg-gradient-to-r from-ios-indigo to-purple-600 rounded-2xl p-5 text-white shadow-lg relative overflow-hidden">
                       <div className="relative z-10">
@@ -382,7 +390,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                           <h3 className="text-xl font-bold mb-1">Complex Taxi Instructions</h3>
                           <p className="text-sm opacity-90 mb-4">针对条件性滑行指令的专项听力训练。</p>
                           <button 
-                             onClick={() => startTraining(TRAINING_SCENARIOS.find(s => s.id === 'taxi_giveway') || TRAINING_SCENARIOS[0])}
+                             onClick={() => startTraining(scenarios.find(s => s.id === 'taxi_giveway') || scenarios[0])}
                              className="px-4 py-2 bg-white text-ios-indigo text-sm font-bold rounded-full shadow-sm hover:scale-105 transition-transform"
                           >
                               开始练习
@@ -455,7 +463,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
 
               {/* Scenario List */}
               <div className="px-6 pb-6 space-y-3">
-                  {filteredScenarios.length === 0 ? (
+                  {loadingScenarios ? (
+                      <div className="text-center py-10 text-gray-400 text-sm animate-pulse">Loading Scenarios...</div>
+                  ) : filteredScenarios.length === 0 ? (
                       <div className="text-center py-10 text-ios-subtext text-sm">没有找到匹配的场景。</div>
                   ) : (
                       filteredScenarios.map(scenario => (
@@ -483,24 +493,6 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                           </button>
                       ))
                   )}
-              </div>
-
-              {/* History Mock */}
-              <div className="px-6 pt-4 border-t border-gray-200">
-                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3">Recent History</h3>
-                  <div className="space-y-3">
-                      {history.map(h => (
-                          <div key={h.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
-                              <div>
-                                  <div className="text-sm font-semibold text-ios-text">{h.title}</div>
-                                  <div className="text-xs text-ios-subtext">{h.date}</div>
-                              </div>
-                              <div className={`px-2 py-1 rounded text-xs font-bold ${h.score >= 4 ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                                  Level {h.score}
-                              </div>
-                          </div>
-                      ))}
-                  </div>
               </div>
           </div>
       );

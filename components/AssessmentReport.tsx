@@ -1,7 +1,9 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { AssessmentData } from '../types';
 import RadarChart from './RadarChart';
+import { userService } from '../services/userService';
+import { mistakeService } from '../services/mistakeService';
 
 interface Props {
   data: AssessmentData;
@@ -10,9 +12,34 @@ interface Props {
 
 const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
   const passed = data.overallScore >= 4;
+  
+  // Track which mistakes have been saved in this session
+  const [savedMistakeIndices, setSavedMistakeIndices] = useState<number[]>([]);
 
   const exportPDF = () => {
     window.print();
+  };
+
+  const handleSaveMistake = async (item: any, idx: number) => {
+      try {
+          const uid = await userService.getCurrentUserId();
+          if (!uid) {
+              alert("请先登录 (Please login first)");
+              return;
+          }
+          await mistakeService.addMistake(
+              uid, 
+              "Assessment Session", // Or pass scenario title via props if available
+              item.context, 
+              item.correction, 
+              item.issue, 
+              item.theory
+          );
+          setSavedMistakeIndices(prev => [...prev, idx]);
+      } catch (e) {
+          console.error("Failed to save mistake", e);
+          alert("保存失败 (Failed to save)");
+      }
   };
 
   // Convert AssessmentData flat fields to RadarChart format
@@ -220,6 +247,14 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                                     <span className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded uppercase">Issue {idx + 1}</span>
                                     <span className="text-sm font-bold text-gray-800">{item.issue}</span>
                                 </div>
+                                <button 
+                                  onClick={() => handleSaveMistake(item, idx)}
+                                  disabled={savedMistakeIndices.includes(idx)}
+                                  className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors flex items-center space-x-1 no-print ${savedMistakeIndices.includes(idx) ? 'bg-green-100 text-green-600' : 'bg-gray-200 text-gray-600 hover:bg-ios-blue hover:text-white'}`}
+                                >
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
+                                    <span>{savedMistakeIndices.includes(idx) ? '已收藏' : '收藏错题'}</span>
+                                </button>
                             </div>
 
                             <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-6">

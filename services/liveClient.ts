@@ -2,6 +2,7 @@
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type, Tool, Schema } from '@google/genai';
 import { base64ToBytes, decodeAudioData, downsampleTo16k } from './audioUtils';
 import { AssessmentData, Scenario, DifficultyLevel } from '../types';
+import { airportService } from './airportService';
 
 interface LiveClientCallbacks {
   onOpen: () => void;
@@ -119,25 +120,6 @@ const assessmentToolDefinition: FunctionDeclaration = {
 };
 
 const tools: Tool[] = [{ functionDeclarations: [assessmentToolDefinition] }];
-
-// List of realistic airports for random selection if user input is missing
-const REAL_WORLD_AIRPORTS = [
-    'ZBAA', // Beijing Capital
-    'ZSPD', // Shanghai Pudong
-    'ZGGG', // Guangzhou Baiyun
-    'ZUUU', // Chengdu Shuangliu
-    'ZSQD', // Qingdao Jiaodong (User Request)
-    'ZBTJ', // Tianjin Binhai
-    'VHHH', // Hong Kong
-    'EGLL', // London Heathrow
-    'KJFK', // New York JFK
-    'RJTT', // Tokyo Haneda
-    'WSSS', // Singapore Changi
-    'OMDB', // Dubai Int'l
-    'YSSY', // Sydney Kingsford Smith
-    'EDDF', // Frankfurt
-    'KLAX'  // Los Angeles
-];
 
 export class LiveClient {
   private ai: GoogleGenAI;
@@ -277,23 +259,25 @@ export class LiveClient {
       const prefix = code.substring(0, 2);
       const prefix1 = code.substring(0, 1);
 
-      // Strategy: 
-      // Asian / SE Asian -> 'Fenrir' (Deep Male, good for mimicking distinct cadences)
-      if (['RK', 'RJ', 'RO', 'WS', 'WM', 'VT', 'RP'].includes(prefix) || prefix1 === 'Z' || prefix1 === 'V') {
+      // 1. Deep / Authoritative Male Voices (Fenrir)
+      // Suitable for: Asia (Z, R, V), Russia (U), some Africa
+      if (['Z', 'R', 'V', 'U'].includes(prefix1)) {
           return 'Fenrir';
       }
 
-      // Middle East / Europe / Africa -> 'Charon' (Deep, Resonant Male)
-      if (prefix1 === 'O' || ['LF', 'LE', 'LI', 'LP', 'ED', 'EG', 'EH', 'EB'].includes(prefix) || prefix1 === 'E' || prefix1 === 'L' || prefix1 === 'H') {
+      // 2. Standard Deep Male (Charon)
+      // Suitable for: Middle East (O), Europe (E, L), South America (S)
+      if (['O', 'E', 'L', 'S', 'F', 'H', 'G', 'D'].includes(prefix1)) {
           return 'Charon';
       }
 
-      // North America -> 'Aoede' (Standard US Female, clear and professional)
-      if (prefix1 === 'K' || prefix1 === 'C') {
+      // 3. Clear Female (Aoede)
+      // Suitable for: North America (K, C), Oceania (Y, N)
+      if (['K', 'C', 'Y', 'N', 'M'].includes(prefix1)) {
           return 'Aoede';
       }
 
-      // South America -> 'Kore' (Default)
+      // Fallback
       return 'Kore';
   }
 
@@ -309,66 +293,109 @@ export class LiveClient {
 
       const base = "!!! CRITICAL VOICE INSTRUCTION !!!\nACT AS A LOCAL ATC CONTROLLER. IMPERSONATE THE ACCENT DESCRIBED BELOW. DO NOT SPEAK STANDARD AMERICAN ENGLISH.";
 
-      if (prefix === 'RK') { // Korea
-          return `${base}
-          - **REGION**: Korea (Incheon Control).
-          - **PHONOLOGY**: Swap /f/ and /p/ (e.g., 'frequency' -> 'prequency'). Confusion between /r/ and /l/.
-          - **INTONATION**: Syllable-timed rhythm. Sentences often end with a slight rising or flat tone.
-          - **EXAMPLE**: "Korean Air 123, turn left heading 270, descend pligh level 240."`;
-      } 
-      if (['RJ', 'RO'].includes(prefix)) { // Japan
-          return `${base}
-          - **REGION**: Japan (Tokyo Control).
-          - **PHONOLOGY**: Insert vowels between consonant clusters (epenthesis, e.g. 'Ground' -> 'Gurunado'). Merge /l/ and /r/. Pronounce 'h' strongly.
-          - **INTONATION**: Flat pitch contour (monotonic). Very polite but rigid cadence. Staccato.
-          - **EXAMPLE**: "Japan Air 901, rradar contact, prease maintain fright revel three zero zero."`;
-      }
-      if (['WS', 'WM'].includes(prefix)) { // Singapore/Malaysia
-          return `${base}
-          - **REGION**: Singapore/Malaysia (Singapore Radar).
-          - **PHONOLOGY**: Staccato rhythm (clipped vowels). Final consonants often dropped ('flight' -> 'fligh'). Th-stopping (/θ/ becomes /t/).
-          - **INTONATION**: High speed. Sentence-final particles implied by tone. Choppy delivery.
-          - **EXAMPLE**: "Singapore 6, traffic 12 o'clock, 5 miles, no factor. Maintain present heading."`;
-      }
-      if (prefix === 'VT') { // Thailand
-          return `${base}
-          - **REGION**: Thailand (Bangkok Control).
-          - **PHONOLOGY**: Unaspirated stops (p, t, k). Omission of final consonants. /r/ sometimes trilled or dropped.
-          - **INTONATION**: Tonal influence. "Sing-song" quality but softer tone.
-          - **EXAMPLE**: "Thai 442, contact ground one two one decimal niner. Sawasdee."`;
-      }
+      // --- ASIA ---
       if (prefix1 === 'Z') { // China
           return `${base}
-          - **REGION**: China (Beijing Control).
-          - **PHONOLOGY**: Difficulty with /th/ (becomes /s/ or /z/). Confusion between /n/ and /l/. Distinct stress on the wrong syllable.
-          - **INTONATION**: Choppy rhythm. Strong, loud projection.
-          - **EXAMPLE**: "Air China 981, turn right heading 090, creal to rand runway 36L."`;
+### **🌏 REGION Z (China) - "Beijing/Shanghai Control"**
+* **Phonology**: /θ/ -> /s/ (Three->Sree), Final consonants swallowed.
+* **Prosody**: Staccato, forceful, high volume.
+* **Lexical**: Strict use of "Decimal", "Standby".
+* **Example**: "Air China 981, radar contact. Turn right heading 090."`;
       }
-      if (prefix1 === 'V') { // India
+      if (prefix === 'RK') { // Korea
           return `${base}
-          - **REGION**: India (Mumbai Control).
-          - **PHONOLOGY**: **Retroflex** /t/ and /d/ (tongue curled back). Merge /v/ and /w/.
-          - **INTONATION**: Distinct musical intonation (rising and falling within words). Very rapid speech rate (140 wpm).
-          - **EXAMPLE**: "Vistara 202, squawk 4321, descend to flight level one zero zero, do not delay."`;
+### **🌏 REGION RK (Korea) - "Incheon Control"**
+* **Phonology**: P/F merger (Frequency->Prequency), R/L liquid sound.
+* **Prosody**: Syllable-timed, distinct high-low-high pitch at end of phrases.
+* **Lexical**: Very polite structure.
+* **Example**: "Korean Air 85, change prequency one two one decimal pipe."`;
       }
-      if (prefix1 === 'O') { // Middle East
+      if (prefix1 === 'V') { // India / SE Asia
           return `${base}
-          - **REGION**: Middle East (Dubai Control).
-          - **PHONOLOGY**: Guttural /h/ and /kh/. Confusion between /p/ and /b/ (e.g., "people" -> "beople"). Trilled /r/.
-          - **INTONATION**: Deep, resonant voice. Deliberate pacing. Simulate radio distance/echo authority.
-          - **EXAMPLE**: "Emirates 5, confirm on board souls? Cleared for take-off runway 12 Reft."`;
+### **🌏 REGION V (India/Thailand) - "Mumbai/Bangkok Control"**
+* **Phonology**: Retroflex T/D (curled tongue). W/V merger.
+* **Prosody**: Musical/Sing-song rhythm. Very fast (130+ WPM).
+* **Lexical**: "Confirm" used often as filler.
+* **Example**: "Vistara 202, confirm visual? Do one thing, descend level eight zero."`;
       }
-      if (prefix1 === 'E' || prefix1 === 'L') { // Europe
+      if (prefix === 'RJ' || prefix === 'RO') { // Japan
           return `${base}
-          - **REGION**: Europe (Euro-English).
-          - **PHONOLOGY**: /th/ becomes /z/ (French) or /s/ (German). H is silent (French) or crisp (German).
-          - **INTONATION**: Rigid, professional, slightly mechanical.`;
+### **🌏 REGION RJ (Japan) - "Tokyo Control"**
+* **Phonology**: Katakana effect (Street->Sutorito), R/L merger.
+* **Prosody**: Monotonic, flat rhythm, robot-like precision.
+* **Example**: "All Nippon 5, rradar contact. Prease cimb and maintain."`;
       }
-      if (prefix1 === 'K' || prefix1 === 'C') { // North America
+
+      // --- MIDDLE EAST & AFRICA ---
+      if (prefix1 === 'O' || ['HE', 'HA', 'DT', 'DA', 'GM', 'LG', 'LT'].includes(prefix)) { // Middle East / North Africa / Turkey
           return `${base}
-          - **REGION**: North America.
-          - **PHONOLOGY**: Standard American/Canadian aviation English. Flapped /t/.
-          - **INTONATION**: Relaxed, confident, slightly faster (Cowboy style).`;
+### **🌏 REGION O/H (Middle East/Arab) - "Dubai/Cairo Control"**
+* **Phonology**: Guttural /h/ and /k/. P/B confusion (Parking->Barking). Trilled R.
+* **Prosody**: Deep, resonant, deliberate pace.
+* **Lexical**: Formal address ("Captain").
+* **Example**: "Emirates 5, cleared to rand runway one two reft. Contact ground."`;
+      }
+      if (['FA', 'DN', 'DG', 'HK', 'FL', 'FW'].includes(prefix)) { // Sub-Saharan Africa
+          return `${base}
+### **🌍 REGION F/D (Africa) - "Jo'burg/Lagos Control"**
+* **Phonology**: Non-rhotic (no hard R). Distinct vowel sounds. 
+* **Prosody**: rhythmic, sometimes rapid.
+* **Example**: "Springbok 202, lineup and wait. Traffic crossing."`;
+      }
+
+      // --- SOUTH AMERICA ---
+      if (prefix1 === 'S' || prefix1 === 'M') { // South/Central America
+          return `${base}
+### **🌎 REGION S/M (Latin America) - "Bogota/Sao Paulo/Mexico Control"**
+* **Phonology**: Vowel insertion before S-clusters (Station->E-station). H is silent (Hotel->Otel).
+* **Prosody**: Syllable-timed (Machine gun rhythm). Rapid Spanish-influenced cadence.
+* **Lexical**: "Roger" used frequently.
+* **Example**: "Avianca 5, turn left, e-speed one eight zero. Contact e-tower."`;
+      }
+
+      // --- RUSSIA / CIS ---
+      if (prefix1 === 'U') { // Russia
+          return `${base}
+### **🌏 REGION U (Russia) - "Moscow Control"**
+* **Phonology**: No /th/ sound (Three->Tree/Zree). Rolling R. Palatalized consonants.
+* **Prosody**: Heavy, falling intonation. Serious tone.
+* **Example**: "Aeroflot 101, descend level tree-zero-zero. Position check."`;
+      }
+
+      // --- OCEANIA ---
+      if (prefix1 === 'Y' || prefix1 === 'N') { // Australia/NZ
+          return `${base}
+### **🌏 REGION Y/N (Oceania) - "Sydney/Auckland Control"**
+* **Phonology**: Vowel shifts (Day->Die). Non-rhotic. 
+* **Prosody**: Up-speak (Rising intonation at end). Relaxed but professional.
+* **Lexical**: "G'day", "No worries" (rarely on radio but tone implies it).
+* **Example**: "Qantas 6, g'day, track direct Merlin, maintain flight level 350."`;
+      }
+
+      // --- EUROPE ---
+      if (prefix === 'LF') { // France
+          return `${base}
+### **🌏 REGION E (France) - "Paris Control"**
+* **Phonology**: H-dropping. Th->Z. Uvular R.
+* **Prosody**: Stress on last syllable.
+* **Example**: "Air France 44, turn left 'eading tree-six-zero. Descend."`;
+      }
+      if (prefix1 === 'E' || prefix1 === 'L') { // General Europe
+          return `${base}
+### **🌏 REGION E (Europe) - "Eurocontrol"**
+* **Phonology**: Varied but generally clear. Slight German/Italian inflections if applicable.
+* **Prosody**: Professional, standard pace.
+* **Example**: "Lufthansa 1, radar contact. Proceed direct."`;
+      }
+
+      // --- NORTH AMERICA ---
+      if (prefix1 === 'K' || prefix1 === 'C') { // USA/Canada
+          return `${base}
+### **🌏 REGION K (USA) - "New York/Chicago Approach"**
+* **Phonology**: Flapped T (Water->Wadder). Hard R.
+* **Prosody**: Very Fast (150+ WPM). Fluid.
+* **Lexical**: "Point" instead of "Decimal". Slang ("Ride", "Smooth").
+* **Example**: "United 6, turn left 220, intercept localizer, keep speed up. Tower 119.1. G'day."`;
       }
       
       return "- **ACCENT**: Use Standard ICAO English with a slight regional touch appropriate for the location if known.";
@@ -433,9 +460,48 @@ export class LiveClient {
 
     // Airport Context Injection Logic
     let targetCode = airportCode ? airportCode.toUpperCase() : "";
+    let airportDetailsStr = "";
+    
     if (!targetCode || targetCode === "GENERIC" || targetCode.length < 3) {
-        targetCode = REAL_WORLD_AIRPORTS[Math.floor(Math.random() * REAL_WORLD_AIRPORTS.length)];
-        console.log(`LiveClient: No airport specified. Randomly selected: ${targetCode}`);
+        // Fallback to random if not specified
+        targetCode = "ZBAA"; 
+        console.log(`LiveClient: No airport specified. Defaulting to: ${targetCode}`);
+    }
+
+    // --- FETCH REAL AIRPORT DATA FROM SUPABASE ---
+    try {
+        const airportData = await airportService.getAirportByCode(targetCode);
+        if (airportData) {
+            console.log("LiveClient: Fetched airport data for", targetCode);
+            // Convert JSONB arrays/objects to string representation for the prompt
+            const rwys = Array.isArray(airportData.runways) ? airportData.runways.join(", ") : "Standard";
+            const freqs = typeof airportData.frequencies === 'object' ? JSON.stringify(airportData.frequencies) : "Standard";
+            
+            // Build Procedure String
+            let procStr = "";
+            if (airportData.procedures) {
+                if (airportData.procedures.sids && airportData.procedures.sids.length > 0) {
+                    procStr += `\n* Available SIDs (Departures): ${airportData.procedures.sids.join(', ')}`;
+                }
+                if (airportData.procedures.stars && airportData.procedures.stars.length > 0) {
+                    procStr += `\n* Available STARs (Arrivals): ${airportData.procedures.stars.join(', ')}`;
+                }
+            }
+            if (airportData.taxi_routes) {
+                procStr += `\n* Common Taxi Routes: ${JSON.stringify(airportData.taxi_routes)}`;
+            }
+
+            airportDetailsStr = `
+            - **AIRPORT DATA**:
+              * Name: ${airportData.name} (${airportData.city})
+              * Runways: ${rwys}
+              * Frequencies: ${freqs}
+              * Elevation: ${airportData.elevation_ft}ft
+              ${procStr}
+            `;
+        }
+    } catch (e) {
+        console.warn("Failed to fetch airport data", e);
     }
 
     // Dynamic Voice & Accent
@@ -447,10 +513,8 @@ export class LiveClient {
     const airportInstruction = `
     # AIRPORT CONTEXT: ${targetCode}
     - **LOCATION**: You are acting as ATC at **${targetCode}**.
-    - **REALISM RULE**: You MUST use REAL-WORLD data for ${targetCode} if available in your knowledge base.
-      * Runway designators (e.g. if ZBAA, use 36R/18L, 01/19. If ZSQD, use 17/35).
-      * Standard Taxiway names.
-      * Local SIDs/STARs and geographic fixes.
+    ${airportDetailsStr}
+    - **REALISM RULE**: You MUST use the specific runways, frequencies, SIDs, and STARs listed above if applicable.
     - **ADAPTATION**: Adapt the current scenario (${scenario.title}) to fit the specific layout of ${targetCode}.
     - **DIVERSION**: If pilot requests diversion, suggest realistic nearby airports for ${targetCode}.
     `;
@@ -474,6 +538,18 @@ export class LiveClient {
     ${difficultyPrompt}
     
     ${accentPrompt}
+
+    # INTERACTION GUIDELINES (DYNAMIC TRAINING):
+    1. **Complexity Scaling**:
+       - If the user answers correctly and quickly -> **Increase WPM** and add background "Static/Noise" descriptions in your speech (e.g., "[Static]... report passing... [Static]").
+       - If the user struggles or says "Say again" -> **Slow down** slightly but **MAINTAIN** the accent features (just articulate better).
+    
+    2. **Correction Logic**:
+       - If the pilot fails to understand a critical number (Heading/Altitude) due to the accent, you must **NOT** drop the accent. 
+       - Instead, use the ICAO technique of saying "I say again" and speaking strictly **digit-by-digit**.
+
+    3. **Emergency/Unexpected**:
+       - Occasionally inject "Garbled transmission" simulation (e.g., *[Static]... turn left... [Static]... zero five zero*).
 
     # BEHAVIOR GUIDELINES:
     - **VOICE ACTING**: The ACCENT INSTRUCTION above is CRITICAL. Maintain the persona of a local controller at ${targetCode}.

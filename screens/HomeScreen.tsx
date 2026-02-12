@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Tab, Scenario } from '../types';
 import RadarChart from '../components/RadarChart';
-import { TRAINING_SCENARIOS } from '../services/trainingData';
+import { scenarioService } from '../services/scenarioService';
 import { userService } from '../services/userService';
 
 interface Props {
@@ -49,6 +49,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
 
   const [userName, setUserName] = useState('Captain');
   const [streak, setStreak] = useState(0);
+  const [scenarios, setScenarios] = useState<Scenario[]>([]);
 
   // --- Audio Player State ---
   const [isPlaying, setIsPlaying] = useState(false);
@@ -64,10 +65,14 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
     else if (hour < 18) setGreeting('下午好, Captain');
     else setGreeting('晚上好, Captain');
 
-    // 2. Fetch User Profile
-    const loadProfile = async () => {
+    // 2. Fetch User Profile & Scenarios
+    const loadData = async () => {
         try {
-            const profile = await userService.getProfile();
+            const [profile, allScenarios] = await Promise.all([
+                userService.getProfile(),
+                scenarioService.getAllScenarios()
+            ]);
+            
             if (profile) {
                 setUserName(profile.name || 'Captain');
                 setStreak(profile.streak || 0);
@@ -82,13 +87,15 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                     setUserSkills(cleanSkills);
                 }
             }
+            setScenarios(allScenarios);
+
         } catch (e) {
             console.error("Failed to load profile for Home", e);
         } finally {
             setLoading(false);
         }
     };
-    loadProfile();
+    loadData();
 
     // Initialize Speech Synth
     if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -186,7 +193,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
 
       switch (weakness) {
           case 'Pronunciation':
-              scenarioId = 'medical'; 
+              scenarioId = 'medical'; // Fallback logic will handle missing IDs by picking default
               reason = '复杂的医疗术语需要更精准的发音。';
               break;
           case 'Structure':
@@ -214,8 +221,16 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
               reason = '全面提升通话能力。';
       }
 
-      // Find the full scenario object
-      const recommendedScenario = TRAINING_SCENARIOS.find(s => s.id === scenarioId) || TRAINING_SCENARIOS[0];
+      // Find the full scenario object from loaded scenarios
+      // Use includes search or fallback to first scenario
+      const recommendedScenario = scenarios.find(s => s.id.includes(scenarioId)) || scenarios[0] || {
+          id: 'fallback',
+          title: 'General Training',
+          details: 'Standard ICAO procedure training.',
+          phase: 'Cruise & Enroute',
+          weather: 'VMC',
+          callsign: 'Training 001'
+      };
 
       return { weakness, minScore, recommendedScenario, reason };
   };
@@ -223,15 +238,18 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
   const recommendation = getRecommendation();
 
   const handleQuickFire = () => {
-      const quickScenarios = TRAINING_SCENARIOS.filter(s => ['Powerplant', 'Security & External Hazards'].includes(s.category || ''));
-      const random = quickScenarios[Math.floor(Math.random() * quickScenarios.length)];
-      onStartScenario(random || TRAINING_SCENARIOS[0]);
+      // Pick a random scenario
+      if (scenarios.length > 0) {
+          const random = scenarios[Math.floor(Math.random() * scenarios.length)];
+          onStartScenario(random);
+      }
   };
 
   const handleCaseStudyPractice = () => {
-      const scenario = TRAINING_SCENARIOS.find(s => s.id === 'bird_eng') || TRAINING_SCENARIOS[0];
+      // Try to find a related scenario
+      const scenario = scenarios.find(s => s.id.includes('bird') || s.id.includes('eng')) || scenarios[0];
       setShowCaseStudy(false);
-      onStartScenario(scenario);
+      if (scenario) onStartScenario(scenario);
   };
 
   return (

@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { DifficultyLevel } from '../types';
 import { userService, UserProfile } from '../services/userService';
 import { authService } from '../services/authService';
+import { achievementService, Achievement } from '../services/achievementService';
+import { mistakeService, MistakeEntry } from '../services/mistakeService';
 
 // --- Types ---
 interface TrainingLog {
@@ -36,6 +38,8 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
   // Real Data State
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [logs, setLogs] = useState<TrainingLog[]>([]);
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [mistakes, setMistakes] = useState<MistakeEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   // API Key Management State
@@ -45,13 +49,19 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
   useEffect(() => {
     const fetchData = async () => {
         setLoading(true);
-        const [profData, logsData] = await Promise.all([
+        const uid = await userService.getCurrentUserId();
+        
+        const [profData, logsData, achData, mistakesData] = await Promise.all([
             userService.getProfile(),
-            userService.getHistory()
+            userService.getHistory(),
+            uid ? achievementService.getUserAchievements(uid) : Promise.resolve([]),
+            uid ? mistakeService.getMistakes(uid) : Promise.resolve([])
         ]);
         
         if (profData) setProfile(profData as UserProfile);
         if (logsData) setLogs(logsData as TrainingLog[]);
+        setAchievements(achData);
+        setMistakes(mistakesData);
 
         const savedKey = localStorage.getItem('gemini_api_key');
         if (savedKey) setCustomKey(savedKey);
@@ -77,6 +87,15 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
           // App.tsx auth listener handles redirect
       } catch (e) {
           console.error("Sign out failed", e);
+      }
+  };
+
+  const handleToggleMistake = async (id: string, currentStatus: boolean) => {
+      try {
+          await mistakeService.toggleMastered(id, !currentStatus);
+          setMistakes(prev => prev.map(m => m.id === id ? { ...m, is_mastered: !currentStatus } : m));
+      } catch (e) {
+          console.error("Failed to update mistake", e);
       }
   };
 
@@ -168,11 +187,75 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
         </div>
       </div>
 
-      {/* 2. Pilot Logbook (History) */}
+      {/* 2. Achievements Section (NEW) */}
+      <div className="px-6 mb-8">
+          <h2 className="text-lg font-bold text-ios-text mb-3 flex items-center">
+             <svg className="w-5 h-5 mr-2 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+             勋章墙 (Achievements)
+          </h2>
+          <div className="bg-white rounded-2xl shadow-soft border border-gray-100 p-4">
+              <div className="grid grid-cols-4 gap-4">
+                  {achievements.map((ach) => (
+                      <div key={ach.id} className="flex flex-col items-center text-center opacity-100">
+                          <div className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl mb-2 transition-all ${ach.unlocked_at ? 'bg-yellow-100 shadow-md scale-100 grayscale-0' : 'bg-gray-100 grayscale opacity-50'}`}>
+                              {ach.icon_url || '🏆'}
+                          </div>
+                          <p className="text-[10px] font-bold text-gray-700 leading-tight">{ach.name}</p>
+                      </div>
+                  ))}
+                  {achievements.length === 0 && (
+                      <p className="col-span-4 text-center text-xs text-gray-400 py-4">No achievements loaded.</p>
+                  )}
+              </div>
+          </div>
+      </div>
+
+      {/* 3. Mistake Book (NEW) */}
+      <div className="px-6 mb-8">
+          <h2 className="text-lg font-bold text-ios-text mb-3 flex items-center">
+             <svg className="w-5 h-5 mr-2 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+             错题本 (Mistake Book)
+          </h2>
+          <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden">
+              {mistakes.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400 text-sm">
+                      暂无错题。在评估报告中点击收藏错题。
+                  </div>
+              ) : (
+                  mistakes.map((m, idx) => (
+                      <div key={m.id} className={`p-4 ${idx !== mistakes.length - 1 ? 'border-b border-gray-100' : ''}`}>
+                          <div className="flex justify-between items-start mb-2">
+                              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-2 py-0.5 rounded uppercase">{m.issue_type}</span>
+                              <button 
+                                onClick={() => handleToggleMistake(m.id, m.is_mastered)}
+                                className={`text-[10px] font-bold px-2 py-1 rounded transition-colors ${m.is_mastered ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                              >
+                                  {m.is_mastered ? '已掌握 (Mastered)' : '标记为已掌握'}
+                              </button>
+                          </div>
+                          
+                          <div className="space-y-2 mb-3">
+                             <div className="text-sm text-red-800 line-through decoration-red-400 decoration-2 decoration-wavy opacity-70">
+                                 "{m.original_text}"
+                             </div>
+                             <div className="text-sm font-bold text-green-700">
+                                 "{m.correction}"
+                             </div>
+                          </div>
+                          <p className="text-xs text-gray-500 bg-gray-50 p-2 rounded-lg">
+                              {m.explanation}
+                          </p>
+                      </div>
+                  ))
+              )}
+          </div>
+      </div>
+
+      {/* 4. Pilot Logbook (History) */}
       <div className="px-6 mb-8">
          <div className="flex justify-between items-center mb-3">
              <h2 className="text-lg font-bold text-ios-text flex items-center">
-                <svg className="w-5 h-5 mr-2 text-ios-subtext" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                <svg className="w-5 h-5 mr-2 text-ios-subtext" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 飞行日志 (Logbook)
              </h2>
          </div>
@@ -208,7 +291,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
          </div>
       </div>
 
-      {/* 3. Flight Deck Configuration (Settings) */}
+      {/* 5. Flight Deck Configuration (Settings) */}
       <div className="px-6 mb-8">
          <h2 className="text-lg font-bold text-ios-text mb-3">系统设置 (Flight Deck Config)</h2>
          <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden">
@@ -321,7 +404,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
          </div>
       </div>
 
-      {/* 4. Logout / Danger Zone */}
+      {/* 6. Logout / Danger Zone */}
       <div className="px-6 pb-6">
           <button 
             onClick={handleSignOut}
@@ -330,7 +413,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
               退出登录 (Log Out)
           </button>
           <p className="text-center text-[10px] text-gray-400 mt-4">
-              ICAO Examiner AI v1.3.1 (Build 503)<br/>
+              ICAO Examiner AI v3.1 (DB Connected)<br/>
               Connected to icao5_trainer DB
           </p>
       </div>

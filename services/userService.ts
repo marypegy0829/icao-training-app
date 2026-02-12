@@ -1,6 +1,7 @@
 
 import { supabase } from './supabaseClient';
 import { AssessmentData } from '../types';
+import { achievementService } from './achievementService';
 
 export interface Skills {
     Pronunciation: number;
@@ -167,6 +168,9 @@ export const userService = {
                     skills: newSkills
                 })
                 .eq('user_id', uid);
+
+            // 3. Trigger Achievement Check
+            await achievementService.checkAchievements(uid, sessionType, score);
         }
     }
 };

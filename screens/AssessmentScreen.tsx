@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { LiveClient } from '../services/liveClient';
-import { getRandomAssessmentScenario } from '../services/trainingData';
+import { scenarioService } from '../services/scenarioService';
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, DifficultyLevel } from '../types';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
@@ -142,17 +142,23 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
       );
   };
 
-  const startBriefing = () => {
-     // Pull a random complex scenario from the main database
-     const s = getRandomAssessmentScenario();
-     setScenario(s);
-     setStatus(ConnectionStatus.BRIEFING);
-     setErrorMsg(null);
+  const startBriefing = async () => {
+     try {
+       // Async fetch from DB (cached)
+       const s = await scenarioService.getRandomAssessmentScenario();
+       setScenario(s);
+       setStatus(ConnectionStatus.BRIEFING);
+       setErrorMsg(null);
+     } catch (e) {
+       console.error("Failed to load scenario", e);
+       setErrorMsg("无法加载考试题目，请检查网络。");
+       setStatus(ConnectionStatus.ERROR);
+     }
   };
   
   // Handler for Refreshing Scenario within Briefing Modal
-  const handleRefreshScenario = () => {
-      const s = getRandomAssessmentScenario();
+  const handleRefreshScenario = async () => {
+      const s = await scenarioService.getRandomAssessmentScenario();
       setScenario(s);
   };
 
