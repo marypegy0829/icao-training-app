@@ -25,15 +25,24 @@ interface TrainingScreenProps {
     initialScenario?: Scenario | null;
     onConsumeScenario?: () => void;
     difficulty: DifficultyLevel;
+    accentEnabled: boolean;
+    cockpitNoise: boolean; // New Prop
 }
 
-const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onConsumeScenario, difficulty }) => {
+const TrainingScreen: React.FC<TrainingScreenProps> = ({ 
+    initialScenario, 
+    onConsumeScenario, 
+    difficulty, 
+    accentEnabled, 
+    cockpitNoise 
+}) => {
   // Navigation State
   const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
   
   // Selection State
   const [selectedPhase, setSelectedPhase] = useState<FlightPhase | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ScenarioCategory | null>(null);
+  const [airportCode, setAirportCode] = useState<string>(''); // NEW: Airport Code State
 
   // Session State
   const [activeScenario, setActiveScenario] = useState<Scenario | null>(null);
@@ -110,7 +119,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     let timeoutId: ReturnType<typeof setTimeout>;
     if (status === ConnectionStatus.ANALYZING) {
       timeoutId = setTimeout(() => {
-        setErrorMsg("Analysis timed out. Please try again.");
+        setErrorMsg("分析超时，请重试。");
         setStatus(ConnectionStatus.ERROR);
         liveClientRef.current?.disconnect();
       }, 60000);
@@ -175,10 +184,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     setActiveScenario(scenario);
     setView('session');
     setStatus(ConnectionStatus.CONNECTING);
-    // Don't clear messages on reconnect if it's a resume-like action (though currently we just restart the session context for stability)
-    // setMessages([]); 
-    // To properly support resuming with history, we'd need to inject history into Gemini context which isn't fully supported in Live API yet.
-    // So we restart the session but keep the scenario.
+    // Don't clear messages on reconnect if it's a resume-like action
     if (status !== ConnectionStatus.ERROR) {
        setMessages([]);
     }
@@ -214,7 +220,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
        - Provide a "Quick Assessment" in the report. Be concise but cover all 6 points.
     `;
 
-    // Pass difficulty to connect
+    // Pass difficulty, airport, accent, AND NOISE SETTING
     await liveClientRef.current.connect(scenario, {
       onOpen: () => {
           setStatus(ConnectionStatus.CONNECTED);
@@ -280,7 +286,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
           // 3. Clean up socket
           liveClientRef.current?.disconnect();
       }
-    }, difficulty, coachingInstruction);
+    }, difficulty, airportCode, accentEnabled, cockpitNoise, coachingInstruction);
   };
 
   const handleStop = async () => {
@@ -342,26 +348,50 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
           <div className="h-full overflow-y-auto bg-ios-bg pb-20 relative">
               
               {/* Header */}
-              <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex justify-between items-center">
-                  <div>
-                      <h1 className="text-2xl font-bold text-ios-text">专项训练</h1>
-                      <div className="flex items-center space-x-2 mt-1">
-                          <p className="text-sm text-ios-subtext">针对性强化飞行特情通话能力</p>
-                          <div className="text-[10px] font-bold text-ios-blue bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase">
-                            Diff: {difficulty}
+              <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex flex-col space-y-4">
+                  <div className="flex justify-between items-center">
+                      <div>
+                          <h1 className="text-2xl font-bold text-ios-text">专项训练</h1>
+                          <div className="flex items-center space-x-2 mt-1">
+                              <p className="text-sm text-ios-subtext">针对性强化飞行特情通话能力</p>
+                              <div className="text-[10px] font-bold text-ios-blue bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase">
+                                Diff: {difficulty}
+                              </div>
                           </div>
                       </div>
+                      <button 
+                        onClick={() => setShowHistory(true)}
+                        className="flex items-center space-x-1.5 bg-gradient-to-r from-ios-blue to-ios-indigo text-white px-4 py-2 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all active:scale-95"
+                      >
+                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                         </svg>
+                         <span className="text-sm font-bold">历史</span>
+                      </button>
                   </div>
-                  {/* PROMINENT HISTORY REPORT BUTTON */}
-                  <button 
-                    onClick={() => setShowHistory(true)}
-                    className="flex items-center space-x-1.5 bg-gradient-to-r from-ios-blue to-ios-indigo text-white px-4 py-2 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all active:scale-95"
-                  >
-                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                     </svg>
-                     <span className="text-sm font-bold">历史报告</span>
-                  </button>
+
+                  {/* Airport Selection Input */}
+                  <div className="relative">
+                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                     </div>
+                     <input 
+                        type="text" 
+                        maxLength={4}
+                        placeholder="机场代码 (例如 ZBAA)" 
+                        className="w-full pl-10 pr-4 py-2 bg-gray-100 border-transparent focus:bg-white focus:border-ios-blue focus:ring-0 rounded-xl text-sm font-mono font-bold uppercase transition-colors"
+                        value={airportCode}
+                        onChange={(e) => setAirportCode(e.target.value.toUpperCase())}
+                     />
+                     {airportCode.length === 4 && (
+                         <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                             <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded">LOCALIZED</span>
+                         </div>
+                     )}
+                  </div>
               </div>
 
               {/* Recommended Section (Mock Logic) */}
@@ -369,16 +399,16 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                   <div className="bg-gradient-to-r from-ios-indigo to-purple-600 rounded-2xl p-5 text-white shadow-lg relative overflow-hidden">
                       <div className="relative z-10">
                           <div className="flex items-center space-x-2 mb-2">
-                              <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold uppercase tracking-wider">Recommended</span>
+                              <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold uppercase tracking-wider">推荐训练</span>
                               <span className="text-xs opacity-80">Phase: Ground Ops</span>
                           </div>
                           <h3 className="text-xl font-bold mb-1">Complex Taxi Instructions</h3>
-                          <p className="text-sm opacity-90 mb-4">Practice listening to conditional clearances.</p>
+                          <p className="text-sm opacity-90 mb-4">针对条件性滑行指令的专项听力训练。</p>
                           <button 
                              onClick={() => startTraining(TRAINING_SCENARIOS.find(s => s.id === 'taxi_giveway') || TRAINING_SCENARIOS[0])}
                              className="px-4 py-2 bg-white text-ios-indigo text-sm font-bold rounded-full shadow-sm hover:scale-105 transition-transform"
                           >
-                              Start Practice
+                              开始练习
                           </button>
                       </div>
                       <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl transform translate-x-10 -translate-y-10"></div>
@@ -387,7 +417,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
 
               {/* Filters */}
               <div className="px-6 mb-4">
-                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3">Flight Phase</h3>
+                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3">飞行阶段 (Flight Phase)</h3>
                   
                   {/* Phase Selector */}
                   <div className="flex space-x-2 overflow-x-auto pb-2 no-scrollbar">
@@ -395,7 +425,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                         onClick={() => setSelectedPhase(null)}
                         className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${!selectedPhase ? 'bg-ios-text text-white' : 'bg-white text-ios-subtext border border-gray-200'}`}
                       >
-                          All Phases
+                          全部阶段
                       </button>
                       {PHASES.map(phase => (
                           <button 
@@ -408,7 +438,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                       ))}
                   </div>
 
-                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mt-4 mb-3">Category</h3>
+                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mt-4 mb-3">分类 (Category)</h3>
                   {/* Category Selector */}
                   <div className="flex flex-wrap gap-2">
                       {SCENARIO_CATEGORIES.map(cat => (
@@ -426,7 +456,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
               {/* Scenario List */}
               <div className="px-6 pb-6 space-y-3">
                   {filteredScenarios.length === 0 ? (
-                      <div className="text-center py-10 text-ios-subtext text-sm">No scenarios match your filters.</div>
+                      <div className="text-center py-10 text-ios-subtext text-sm">没有找到匹配的场景。</div>
                   ) : (
                       filteredScenarios.map(scenario => (
                           <button 
@@ -444,6 +474,12 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                               </div>
                               <h4 className="font-bold text-ios-text mb-1">{scenario.title}</h4>
                               <p className="text-xs text-ios-subtext line-clamp-2">{scenario.details}</p>
+                              {airportCode && airportCode.length === 4 && (
+                                  <div className="mt-2 text-[10px] text-gray-400 flex items-center">
+                                      <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
+                                      Training at {airportCode}
+                                  </div>
+                              )}
                           </button>
                       ))
                   )}
@@ -478,8 +514,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
         {status === ConnectionStatus.ANALYZING && (
           <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white animate-fade-in">
               <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mb-6"></div>
-              <h2 className="text-2xl font-bold mb-2">Generating Feedback</h2>
-              <p className="text-white/80 text-center max-w-xs">Instructor is analyzing your performance...</p>
+              <h2 className="text-2xl font-bold mb-2">正在生成反馈</h2>
+              <p className="text-white/80 text-center max-w-xs">教员正在分析你的表现...</p>
           </div>
         )}
 
@@ -502,20 +538,23 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                  <svg className="w-5 h-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                  </svg>
-                 <span className="text-sm font-bold">Abort</span>
+                 <span className="text-sm font-bold">中断 (Abort)</span>
                </button>
+               {airportCode && (
+                   <span className="text-[10px] font-bold bg-white/50 px-2 py-0.5 rounded text-gray-500 border border-gray-200">{airportCode}</span>
+               )}
              </div>
              <h1 className="text-xl font-bold tracking-tight text-ios-text truncate max-w-[200px]">{activeScenario?.title}</h1>
           </div>
           <div className="flex flex-col items-end">
              <div className="bg-white/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-ios-border shadow-sm mb-1">
-                <span className="text-xs font-semibold text-ios-subtext">Training Mode</span>
+                <span className="text-xs font-semibold text-ios-subtext">训练模式</span>
              </div>
              <button 
                onClick={togglePtt}
                className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${isPttEnabled ? 'bg-ios-text text-white border-ios-text' : 'bg-transparent text-ios-subtext border-transparent hover:border-black/10'}`}
              >
-               {isPttEnabled ? 'PTT ON' : 'OPEN MIC'}
+               {isPttEnabled ? 'PTT 模式' : '开放麦'}
              </button>
           </div>
         </header>
@@ -539,20 +578,20 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
               {/* Error Overlay */}
               {status === ConnectionStatus.ERROR && errorMsg && (
                 <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
-                  <h3 className="text-ios-text font-bold text-lg mb-2">Connection Failed</h3>
+                  <h3 className="text-ios-text font-bold text-lg mb-2">连接失败</h3>
                   <p className="text-ios-subtext text-sm mb-6 max-w-xs">{errorMsg}</p>
                    <div className="flex space-x-3">
                     <button 
                         onClick={() => setView('dashboard')}
                         className="px-6 py-2 bg-gray-200 text-gray-700 rounded-full text-sm font-semibold hover:bg-gray-300 transition-all"
                     >
-                        Dashboard
+                        返回主页
                     </button>
                     <button 
                         onClick={handleReconnect}
                         className="px-6 py-2 bg-ios-red text-white rounded-full text-sm font-semibold shadow-lg hover:shadow-ios-red/30 transition-all"
                     >
-                        Resume Session
+                        恢复会话
                     </button>
                   </div>
                 </div>
@@ -593,7 +632,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                         ? 'bg-ios-orange text-white border-ios-orange scale-95' 
                         : 'bg-white text-ios-text border-gray-200'}`}
                  >
-                    {isTransmitting ? 'TRANSMITTING' : 'HOLD TO TALK'}
+                    {isTransmitting ? '正在通话' : '按住说话'}
                  </button>
              )}
 
@@ -608,7 +647,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                    isPttEnabled ? (
                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                    ) : (
-                       <span className="font-semibold text-lg">Finish</span>
+                       <span className="font-semibold text-lg">完成训练</span>
                    )
                 )}
              </button>

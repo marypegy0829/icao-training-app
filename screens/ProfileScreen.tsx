@@ -17,10 +17,20 @@ interface TrainingLog {
 interface ProfileScreenProps {
   difficulty: DifficultyLevel;
   setDifficulty: (level: DifficultyLevel) => void;
+  accentEnabled: boolean;
+  setAccentEnabled: (enabled: boolean) => void;
+  cockpitNoise: boolean;
+  setCockpitNoise: (enabled: boolean) => void;
 }
 
-const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty }) => {
-  const [cockpitNoise, setCockpitNoise] = useState(true);
+const ProfileScreen: React.FC<ProfileScreenProps> = ({ 
+    difficulty, 
+    setDifficulty, 
+    accentEnabled, 
+    setAccentEnabled,
+    cockpitNoise,
+    setCockpitNoise
+}) => {
   const [notifications, setNotifications] = useState(true);
   
   // Real Data State
@@ -54,10 +64,10 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
   const handleSaveKey = () => {
       if (customKey.trim()) {
           localStorage.setItem('gemini_api_key', customKey.trim());
-          alert("Custom API Key Saved.");
+          alert("自定义 API Key 已保存。");
       } else {
           localStorage.removeItem('gemini_api_key');
-          alert("Switched to Default/Env API Key.");
+          alert("已切换回默认/环境变量 API Key。");
       }
   };
 
@@ -85,7 +95,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
           <div className="h-full flex items-center justify-center bg-ios-bg">
               <div className="flex flex-col items-center space-y-4">
                   <div className="w-8 h-8 border-4 border-ios-blue border-t-transparent rounded-full animate-spin"></div>
-                  <div className="text-ios-subtext text-sm animate-pulse">Syncing Pilot Profile...</div>
+                  <div className="text-ios-subtext text-sm animate-pulse">正在同步飞行员数据...</div>
               </div>
           </div>
       );
@@ -145,15 +155,15 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
         <div className="grid grid-cols-3 gap-4 mt-8">
             <div className="text-center p-3 bg-gray-50 rounded-2xl border border-gray-100">
                 <div className="text-xl font-bold text-ios-text">{Number(displayProfile.flight_hours).toFixed(1)}</div>
-                <div className="text-[10px] font-bold text-ios-subtext uppercase">Training Hrs</div>
+                <div className="text-[10px] font-bold text-ios-subtext uppercase">训练时长 (h)</div>
             </div>
             <div className="text-center p-3 bg-gray-50 rounded-2xl border border-gray-100">
                 <div className="text-xl font-bold text-ios-text">{displayProfile.total_sorties}</div>
-                <div className="text-[10px] font-bold text-ios-subtext uppercase">Sorties</div>
+                <div className="text-[10px] font-bold text-ios-subtext uppercase">起降次数</div>
             </div>
             <div className="text-center p-3 bg-gray-50 rounded-2xl border border-gray-100">
                 <div className="text-xl font-bold text-ios-orange">{displayProfile.streak}</div>
-                <div className="text-[10px] font-bold text-ios-subtext uppercase">Day Streak</div>
+                <div className="text-[10px] font-bold text-ios-subtext uppercase">连续打卡</div>
             </div>
         </div>
       </div>
@@ -163,14 +173,14 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
          <div className="flex justify-between items-center mb-3">
              <h2 className="text-lg font-bold text-ios-text flex items-center">
                 <svg className="w-5 h-5 mr-2 text-ios-subtext" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
-                Pilot Logbook
+                飞行日志 (Logbook)
              </h2>
          </div>
          
          <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden min-h-[100px]">
              {logs.length === 0 ? (
                  <div className="p-8 text-center text-gray-400 text-sm">
-                     No flight records found. Start training to fill your logbook.
+                     暂无记录。开始训练以填充你的日志。
                  </div>
              ) : (
                  logs.map((log, idx) => (
@@ -200,7 +210,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
 
       {/* 3. Flight Deck Configuration (Settings) */}
       <div className="px-6 mb-8">
-         <h2 className="text-lg font-bold text-ios-text mb-3">Flight Deck Config</h2>
+         <h2 className="text-lg font-bold text-ios-text mb-3">系统设置 (Flight Deck Config)</h2>
          <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden">
              
              {/* Setting Item: Training Difficulty */}
@@ -209,7 +219,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
                     <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                     </div>
-                    <span className="text-sm font-medium text-gray-900">Training Difficulty</span>
+                    <span className="text-sm font-medium text-gray-900">训练难度 (Difficulty)</span>
                  </div>
                  
                  <div className="relative">
@@ -227,41 +237,51 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
                     </div>
                  </div>
                  <p className="text-[10px] text-gray-500 mt-2 ml-1">
-                    Affects ATC speaking speed, vocabulary complexity, and scenario intensity.
+                    影响 ATC 的语速、词汇复杂度和情景压力。
                  </p>
+             </div>
+
+             {/* Setting Item: Controller Accent */}
+             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                 <div className="flex flex-col">
+                     <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">管制员口音 (Regional Accent)</span>
+                     </div>
+                     <p className="text-[10px] text-gray-500 mt-1 ml-11 max-w-[200px]">
+                         模拟当地口音（如 RKSI 韩国口音, WSSS 新加坡口音等）。
+                     </p>
+                 </div>
+                 <button 
+                   onClick={() => setAccentEnabled(!accentEnabled)}
+                   className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ml-2`}
+                   style={{backgroundColor: accentEnabled ? '#34C759' : '#E5E7EB'}}
+                 >
+                     <div className={`w-5 h-5 bg-white rounded-full shadow absolute top-0.5 transition-transform ${accentEnabled ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`}></div>
+                 </button>
              </div>
 
              {/* Setting Item: Cockpit Noise */}
              <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-                 <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                 <div className="flex flex-col">
+                    <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">驾驶舱噪音 (Simulation)</span>
                     </div>
-                    <span className="text-sm font-medium text-gray-900">Cockpit Noise Simulation</span>
+                    <p className="text-[10px] text-gray-500 mt-1 ml-11 max-w-[200px]">
+                         生成逼真的引擎轰鸣声（Brown Noise），增加沉浸感。
+                     </p>
                  </div>
                  <button 
                    onClick={() => setCockpitNoise(!cockpitNoise)}
-                   className={`w-11 h-6 rounded-full transition-colors relative ${cockpitNoise ? 'bg-ios-green' : 'bg-gray-200'}`}
+                   className={`w-11 h-6 rounded-full transition-colors relative`}
                    style={{backgroundColor: cockpitNoise ? '#34C759' : '#E5E7EB'}}
                  >
                      <div className={`w-5 h-5 bg-white rounded-full shadow absolute top-0.5 transition-transform ${cockpitNoise ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`}></div>
-                 </button>
-             </div>
-
-             {/* Setting Item: Notifications */}
-             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-                 <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                    </div>
-                    <span className="text-sm font-medium text-gray-900">Training Reminders</span>
-                 </div>
-                 <button 
-                   onClick={() => setNotifications(!notifications)}
-                   className={`w-11 h-6 rounded-full transition-colors relative`}
-                   style={{backgroundColor: notifications ? '#34C759' : '#E5E7EB'}}
-                 >
-                     <div className={`w-5 h-5 bg-white rounded-full shadow absolute top-0.5 transition-transform ${notifications ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`}></div>
                  </button>
              </div>
 
@@ -271,7 +291,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
                     onClick={() => setShowKeyInput(!showKeyInput)}
                     className="flex items-center justify-between w-full text-xs font-bold text-gray-400 uppercase tracking-wider hover:text-gray-600 transition-colors"
                  >
-                    <span>Developer Settings</span>
+                    <span>开发者设置 (Developer)</span>
                     <svg className={`w-4 h-4 transition-transform ${showKeyInput ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                  </button>
                  
@@ -290,10 +310,10 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
                                 onClick={handleSaveKey}
                                 className="px-3 py-2 bg-ios-text text-white text-xs font-bold rounded-lg hover:bg-gray-800"
                              >
-                                Save
+                                保存
                              </button>
                          </div>
-                         <p className="text-[9px] text-gray-400 mt-1">Leave empty to use default environment key. Stored locally.</p>
+                         <p className="text-[9px] text-gray-400 mt-1">留空使用默认环境 Key。Key 仅存储在本地浏览器。</p>
                      </div>
                  )}
              </div>
@@ -307,7 +327,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ difficulty, setDifficulty
             onClick={handleSignOut}
             className="w-full py-3 rounded-xl border border-gray-200 text-red-500 font-bold text-sm hover:bg-red-50 transition-colors"
           >
-              Log Out
+              退出登录 (Log Out)
           </button>
           <p className="text-center text-[10px] text-gray-400 mt-4">
               ICAO Examiner AI v1.3.1 (Build 503)<br/>

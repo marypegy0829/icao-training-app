@@ -14,9 +14,11 @@ import { useWakeLock } from '../hooks/useWakeLock';
 
 interface AssessmentScreenProps {
   difficulty: DifficultyLevel;
+  accentEnabled: boolean;
+  cockpitNoise: boolean; // New Prop
 }
 
-const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
+const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentEnabled, cockpitNoise }) => {
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -26,6 +28,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   const [showHistory, setShowHistory] = useState(false);
   const startTimeRef = useRef<number>(0);
   
+  // Track selected airport internally for reconnect logic
+  const [activeAirport, setActiveAirport] = useState<string>('ZBAA');
+
   // PTT State
   const [isPttEnabled, setIsPttEnabled] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
@@ -33,7 +38,6 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   const liveClientRef = useRef<LiveClient | null>(null);
 
   // --- PREVENT SCREEN SLEEP ---
-  // Activate wake lock when status is NOT Disconnected, Error, or Analyzing (allow sleep during report reading if needed, but safer to keep on if connected)
   const isSessionActive = status === ConnectionStatus.BRIEFING || status === ConnectionStatus.CONNECTING || status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING;
   useWakeLock(isSessionActive);
   
@@ -42,12 +46,11 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
       let watchdog: ReturnType<typeof setTimeout>;
       
       if (status === ConnectionStatus.CONNECTING) {
-          // If connection takes longer than 15 seconds, timeout
           watchdog = setTimeout(() => {
               if (status === ConnectionStatus.CONNECTING) {
                   console.error("Connection timed out.");
                   setStatus(ConnectionStatus.ERROR);
-                  setErrorMsg("Connection timed out. Please check your network and API Key.");
+                  setErrorMsg("连接超时。请检查网络或 API Key 设置。");
                   liveClientRef.current?.disconnect();
               }
           }, 15000);
@@ -58,11 +61,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
 
   // Get API KEY safely with Override support
   const getApiKey = () => {
-    // 1. Check Local Storage (User Override)
     const localKey = localStorage.getItem('gemini_api_key');
     if (localKey && localKey.trim().length > 0) return localKey.trim();
 
-    // 2. Env Vars
     let key = '';
     try {
       const meta = import.meta as any;
@@ -81,7 +82,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
 
   useEffect(() => {
     if (!API_KEY) {
-      setErrorMsg("API Key Missing. Please check your settings.");
+      setErrorMsg("未找到 API Key。请检查设置。");
     }
     return () => {
       liveClientRef.current?.disconnect();
@@ -92,9 +93,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout>;
     if (status === ConnectionStatus.ANALYZING) {
-      // If we don't get a result within 60 seconds (increased from 20), assume failure
       timeoutId = setTimeout(() => {
-        setErrorMsg("Analysis timed out. The model failed to return a report.");
+        setErrorMsg("分析超时。模型未返回报告，请重试。");
         setStatus(ConnectionStatus.ERROR);
         liveClientRef.current?.disconnect();
       }, 60000);
@@ -153,42 +153,42 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   // Re-connect logic without changing scenario
   const handleReconnect = async () => {
     if (scenario) {
-      handleConnect();
+      handleConnect(activeAirport); // Reuse last selected airport
     } else {
       startBriefing();
     }
   };
 
-  const handleConnect = async () => {
+  const handleConnect = async (selectedAirportCode: string) => {
     // 1. Strict Check for API Key
     if (!API_KEY) {
-        setErrorMsg("API Key is missing. Check settings.");
+        setErrorMsg("缺少 API Key。请检查设置。");
         setStatus(ConnectionStatus.ERROR);
         return;
     }
     if (!scenario) return;
     
+    // Save selection
+    setActiveAirport(selectedAirportCode);
+
     setStatus(ConnectionStatus.CONNECTING);
     liveClientRef.current = new LiveClient(API_KEY);
     
     // Initial mute state based on PTT setting
     liveClientRef.current.setInputMuted(isPttEnabled);
 
-    // Connect with the global difficulty setting
+    // Connect with the global difficulty setting AND selected Airport
     try {
+        // Dynamic Airport Code passed here -> Triggers Accent Logic in LiveClient
         await liveClientRef.current.connect(scenario, {
           onOpen: () => {
-              console.log("Connection Established (UI update)");
+              console.log(`Connection Established at ${selectedAirportCode}`);
               setStatus(ConnectionStatus.CONNECTED);
               startTimeRef.current = Date.now();
           },
           onClose: () => { 
             setStatus(prev => {
-                // CRITICAL FIX: If we are ANALYZING, do NOT switch to disconnected yet.
-                // Wait for the assessment report to handle the transition.
                 if (prev === ConnectionStatus.ANALYZING) return prev;
-                
-                // Keep ERROR state if set, otherwise go to DISCONNECTED
                 return prev === ConnectionStatus.ERROR ? prev : ConnectionStatus.DISCONNECTED;
             }); 
             setAudioLevel(0);
@@ -196,7 +196,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
           onError: (err) => { 
             console.error("Connection Error (UI):", err);
             setStatus(ConnectionStatus.ERROR); 
-            setErrorMsg(err.message || "Connection failed. Please check console."); 
+            setErrorMsg(err.message || "连接失败。请检查控制台。"); 
             setAudioLevel(0);
           },
           onAudioData: (level) => setAudioLevel(level),
@@ -228,26 +228,19 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
           },
           onAssessment: (data) => {
             console.log("Assessment Received:", data);
-            
-            // 1. Set Data immediately so Modal can mount
             setAssessment(data);
-            
-            // 2. Save to History (Background)
             saveToSupabase(data);
             
-            // 3. Smooth Transition: 
-            // Keep "Analyzing" spinner for a split second while Modal animates in,
-            // then switch underlying status to DISCONNECTED.
             setTimeout(() => {
                 setStatus(ConnectionStatus.DISCONNECTED);
                 liveClientRef.current?.disconnect();
             }, 500);
           }
-        }, difficulty); 
+        }, difficulty, selectedAirportCode, accentEnabled, cockpitNoise); 
     } catch (err: any) {
         console.error("Immediate Connection Failure:", err);
         setStatus(ConnectionStatus.ERROR);
-        setErrorMsg(err.message || "Failed to initiate connection.");
+        setErrorMsg(err.message || "初始化连接失败。");
     }
   };
 
@@ -307,11 +300,11 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                      <span className="text-xs font-bold animate-pulse">AI</span>
                   </div>
               </div>
-              <h2 className="text-2xl font-bold mt-6 mb-2">Analyzing Performance</h2>
+              <h2 className="text-2xl font-bold mt-6 mb-2">正在分析表现</h2>
               <div className="flex flex-col space-y-1 text-center text-sm text-white/80">
-                  <p>Processing linguistic patterns...</p>
-                  <p>Evaluating ICAO compliance...</p>
-                  <p>Generating report...</p>
+                  <p>处理语言模式...</p>
+                  <p>评估 ICAO 合规性...</p>
+                  <p>生成评估报告...</p>
               </div>
           </div>
       )}
@@ -355,7 +348,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
              <div className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-ios-orange animate-pulse' : 'bg-gray-400'}`}></div>
              <span className="text-[10px] font-bold tracking-widest text-ios-subtext uppercase">ICAO Level 5</span>
            </div>
-           <h1 className="text-2xl font-bold tracking-tight text-ios-text">Examiner</h1>
+           <h1 className="text-2xl font-bold tracking-tight text-ios-text">AI 模拟考官</h1>
         </div>
         <div className="flex flex-col items-end">
            <div className="flex items-center space-x-2 mb-1">
@@ -380,7 +373,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
              onClick={togglePtt}
              className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${isPttEnabled ? 'bg-ios-text text-white border-ios-text' : 'bg-transparent text-ios-subtext border-transparent hover:border-black/10'}`}
            >
-             {isPttEnabled ? 'PTT ON' : 'OPEN MIC'}
+             {isPttEnabled ? 'PTT 模式 (按住)' : '开放麦模式'}
            </button>
         </div>
       </header>
@@ -397,8 +390,14 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
         {/* Lower: Transcript */}
         <div className="flex-1 flex flex-col bg-white/50 backdrop-blur-lg border-t border-white/20 rounded-t-[2.5rem] shadow-soft overflow-hidden mx-2 relative">
             <div className="px-6 py-3 border-b border-black/5 flex justify-between items-center">
-                <span className="text-xs font-semibold text-ios-subtext">Live Transcript</span>
-                {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">Connecting...</span>}
+                <span className="text-xs font-semibold text-ios-subtext">实时对话记录 (Live Transcript)</span>
+                {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">正在连接...</span>}
+                {/* Show Current Airport Code */}
+                {status === ConnectionStatus.CONNECTED && (
+                    <span className="text-[10px] font-mono font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded border border-gray-200">
+                        {activeAirport}
+                    </span>
+                )}
             </div>
             
             {/* Error Overlay with Retry */}
@@ -409,20 +408,20 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
                 </div>
-                <h3 className="text-ios-text font-bold text-lg mb-2">Connection Failed</h3>
+                <h3 className="text-ios-text font-bold text-lg mb-2">连接失败</h3>
                 <p className="text-ios-subtext text-sm mb-6 max-w-xs">{errorMsg}</p>
                 <div className="flex space-x-3">
                   <button 
                     onClick={() => setStatus(ConnectionStatus.DISCONNECTED)}
                     className="px-6 py-2 bg-gray-200 text-gray-700 rounded-full text-sm font-semibold hover:bg-gray-300 transition-all"
                   >
-                    Cancel
+                    取消
                   </button>
                   <button 
                     onClick={handleReconnect}
                     className="px-6 py-2 bg-ios-red text-white rounded-full text-sm font-semibold shadow-lg hover:shadow-ios-red/30 transition-all"
                   >
-                    Resume Session
+                    重试
                   </button>
                 </div>
               </div>
@@ -444,11 +443,11 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
              </svg>
-             <span>Start Interview</span>
+             <span>开始考试 (Start Interview)</span>
            </button>
         ) : status === ConnectionStatus.BRIEFING ? (
             <div className="w-full h-12 flex items-center justify-center text-ios-subtext text-sm animate-pulse">
-                Reviewing Mission...
+                正在审核任务简报...
             </div>
         ) : (
            <div className="flex space-x-3">
@@ -467,7 +466,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                         ? 'bg-ios-orange text-white border-ios-orange scale-95' 
                         : 'bg-white text-ios-text border-gray-200'}`}
                  >
-                    {isTransmitting ? 'TRANSMITTING' : 'HOLD TO TALK'}
+                    {isTransmitting ? '正在通话' : '按住说话'}
                  </button>
              )}
 
@@ -479,13 +478,13 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                 {status === ConnectionStatus.ANALYZING ? (
                    <div className="flex items-center space-x-2">
                       <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-ios-red rounded-full"></div>
-                      <span className="text-xs font-bold text-ios-red">Generating...</span>
+                      <span className="text-xs font-bold text-ios-red">生成报告...</span>
                    </div>
                 ) : (
                    isPttEnabled ? (
                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                    ) : (
-                       <span className="font-semibold text-lg">End Session</span>
+                       <span className="font-semibold text-lg">结束考试</span>
                    )
                 )}
              </button>

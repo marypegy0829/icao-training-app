@@ -15,7 +15,11 @@ const App: React.FC = () => {
   // App Tabs State
   const [currentTab, setCurrentTab] = useState<Tab>('home'); 
   const [pendingScenario, setPendingScenario] = useState<Scenario | null>(null);
+  
+  // Settings State
   const [difficulty, setDifficulty] = useState<DifficultyLevel>(DifficultyLevel.LEVEL_4_RECURRENT);
+  const [accentEnabled, setAccentEnabled] = useState<boolean>(false); 
+  const [cockpitNoise, setCockpitNoise] = useState<boolean>(true); // New Noise State
 
   useEffect(() => {
     // 1. Check active session
@@ -33,9 +37,27 @@ const App: React.FC = () => {
          // Optionally handle password recovery UI specifically here
       }
     });
+    
+    // 3. Load settings from local storage
+    const savedAccent = localStorage.getItem('icao_accent_enabled');
+    if (savedAccent) setAccentEnabled(savedAccent === 'true');
+
+    const savedNoise = localStorage.getItem('icao_cockpit_noise');
+    if (savedNoise) setCockpitNoise(savedNoise === 'true');
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Persist settings
+  const handleSetAccent = (enabled: boolean) => {
+      setAccentEnabled(enabled);
+      localStorage.setItem('icao_accent_enabled', String(enabled));
+  };
+
+  const handleSetNoise = (enabled: boolean) => {
+      setCockpitNoise(enabled);
+      localStorage.setItem('icao_cockpit_noise', String(enabled));
+  };
 
   const handleStartScenario = (scenario: Scenario) => {
     setPendingScenario(scenario);
@@ -67,14 +89,31 @@ const App: React.FC = () => {
             initialScenario={pendingScenario} 
             onConsumeScenario={() => setPendingScenario(null)} 
             difficulty={difficulty}
+            accentEnabled={accentEnabled}
+            cockpitNoise={cockpitNoise}
           />
         );
       case 'assessment':
-        return <AssessmentScreen difficulty={difficulty} />;
+        return (
+            <AssessmentScreen 
+                difficulty={difficulty} 
+                accentEnabled={accentEnabled}
+                cockpitNoise={cockpitNoise}
+            />
+        );
       case 'profile':
-        return <ProfileScreen difficulty={difficulty} setDifficulty={setDifficulty} />;
+        return (
+            <ProfileScreen 
+                difficulty={difficulty} 
+                setDifficulty={setDifficulty}
+                accentEnabled={accentEnabled}
+                setAccentEnabled={handleSetAccent}
+                cockpitNoise={cockpitNoise}
+                setCockpitNoise={handleSetNoise}
+            />
+        );
       default:
-        return <AssessmentScreen difficulty={difficulty} />;
+        return <AssessmentScreen difficulty={difficulty} accentEnabled={accentEnabled} cockpitNoise={cockpitNoise} />;
     }
   };
 

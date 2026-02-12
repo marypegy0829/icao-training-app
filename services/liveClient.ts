@@ -120,6 +120,25 @@ const assessmentToolDefinition: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [assessmentToolDefinition] }];
 
+// List of realistic airports for random selection if user input is missing
+const REAL_WORLD_AIRPORTS = [
+    'ZBAA', // Beijing Capital
+    'ZSPD', // Shanghai Pudong
+    'ZGGG', // Guangzhou Baiyun
+    'ZUUU', // Chengdu Shuangliu
+    'ZSQD', // Qingdao Jiaodong (User Request)
+    'ZBTJ', // Tianjin Binhai
+    'VHHH', // Hong Kong
+    'EGLL', // London Heathrow
+    'KJFK', // New York JFK
+    'RJTT', // Tokyo Haneda
+    'WSSS', // Singapore Changi
+    'OMDB', // Dubai Int'l
+    'YSSY', // Sydney Kingsford Smith
+    'EDDF', // Frankfurt
+    'KLAX'  // Los Angeles
+];
+
 export class LiveClient {
   private ai: GoogleGenAI;
   private inputAudioContext: AudioContext | null = null;
@@ -131,6 +150,10 @@ export class LiveClient {
   private processor: ScriptProcessorNode | null = null;
   private inputSource: MediaStreamAudioSourceNode | null = null;
   private isInputMuted: boolean = false;
+  
+  // Noise Simulation
+  private noiseSource: AudioBufferSourceNode | null = null;
+  private noiseGain: GainNode | null = null;
   
   // Transcript State
   private fullTranscript: string = ""; 
@@ -145,6 +168,64 @@ export class LiveClient {
 
   setInputMuted(muted: boolean) {
     this.isInputMuted = muted;
+  }
+
+  // --- AUDIO GENERATION ENGINE ---
+  // Generates Brown Noise (Simulates Engine Rumble / Wind)
+  private createCockpitNoise(ctx: AudioContext): AudioBuffer {
+      const bufferSize = ctx.sampleRate * 5; // 5 seconds loop
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      
+      let lastOut = 0;
+      for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          // Brown noise algorithm (Integrated White Noise) with leak
+          // This creates a -6dB/octave slope (Low frequency rumble)
+          lastOut = (lastOut + (0.02 * white)) / 1.02;
+          data[i] = lastOut * 3.5; // Compensate gain
+      }
+      return buffer;
+  }
+
+  private startCockpitNoise(enabled: boolean) {
+      if (!enabled || !this.outputAudioContext) return;
+      
+      try {
+          this.stopCockpitNoise(); // Stop any existing
+
+          const noiseBuffer = this.createCockpitNoise(this.outputAudioContext);
+          this.noiseSource = this.outputAudioContext.createBufferSource();
+          this.noiseSource.buffer = noiseBuffer;
+          this.noiseSource.loop = true;
+
+          // Gain Node for Volume Control
+          this.noiseGain = this.outputAudioContext.createGain();
+          
+          // -20dB equivalent (approx 0.1) creates a subtle background rumble
+          // We want it audible but not overwhelming the voice.
+          this.noiseGain.gain.value = 0.08; 
+
+          this.noiseSource.connect(this.noiseGain);
+          this.noiseGain.connect(this.outputAudioContext.destination);
+          
+          this.noiseSource.start();
+          console.log("Cockpit Audio Environment: ENGAGED");
+      } catch (e) {
+          console.warn("Failed to start cockpit noise:", e);
+      }
+  }
+
+  private stopCockpitNoise() {
+      if (this.noiseSource) {
+          try { this.noiseSource.stop(); } catch(e) {}
+          this.noiseSource.disconnect();
+          this.noiseSource = null;
+      }
+      if (this.noiseGain) {
+          this.noiseGain.disconnect();
+          this.noiseGain = null;
+      }
   }
 
   // Generate prompts based on difficulty
@@ -187,7 +268,121 @@ export class LiveClient {
       }
   }
 
-  async connect(scenario: Scenario, callbacks: LiveClientCallbacks, difficulty: DifficultyLevel = DifficultyLevel.LEVEL_4_RECURRENT, customSystemInstruction?: string) {
+  // --- NEW: Voice Selection Logic ---
+  private getVoiceName(airportCode: string, enabled: boolean): string {
+      // Default / Standard voice
+      if (!enabled || !airportCode || airportCode.length < 2) return 'Kore';
+
+      const code = airportCode.toUpperCase();
+      const prefix = code.substring(0, 2);
+      const prefix1 = code.substring(0, 1);
+
+      // Strategy: 
+      // Asian / SE Asian -> 'Fenrir' (Deep Male, good for mimicking distinct cadences)
+      if (['RK', 'RJ', 'RO', 'WS', 'WM', 'VT', 'RP'].includes(prefix) || prefix1 === 'Z' || prefix1 === 'V') {
+          return 'Fenrir';
+      }
+
+      // Middle East / Europe / Africa -> 'Charon' (Deep, Resonant Male)
+      if (prefix1 === 'O' || ['LF', 'LE', 'LI', 'LP', 'ED', 'EG', 'EH', 'EB'].includes(prefix) || prefix1 === 'E' || prefix1 === 'L' || prefix1 === 'H') {
+          return 'Charon';
+      }
+
+      // North America -> 'Aoede' (Standard US Female, clear and professional)
+      if (prefix1 === 'K' || prefix1 === 'C') {
+          return 'Aoede';
+      }
+
+      // South America -> 'Kore' (Default)
+      return 'Kore';
+  }
+
+  // --- NEW: Enhanced Accent Prompts ---
+  private getAccentInstruction(airportCode: string, enabled: boolean): string {
+      if (!enabled || !airportCode || airportCode.length < 2) {
+          return "- **ACCENT**: Use Standard ICAO English / Generic US/UK Accent. Clear and Neutral.";
+      }
+
+      const code = airportCode.toUpperCase();
+      const prefix = code.substring(0, 2);
+      const prefix1 = code.substring(0, 1);
+
+      const base = "!!! CRITICAL VOICE INSTRUCTION !!!\nACT AS A LOCAL ATC CONTROLLER. IMPERSONATE THE ACCENT DESCRIBED BELOW. DO NOT SPEAK STANDARD AMERICAN ENGLISH.";
+
+      if (prefix === 'RK') { // Korea
+          return `${base}
+          - **REGION**: Korea (Incheon Control).
+          - **PHONOLOGY**: Swap /f/ and /p/ (e.g., 'frequency' -> 'prequency'). Confusion between /r/ and /l/.
+          - **INTONATION**: Syllable-timed rhythm. Sentences often end with a slight rising or flat tone.
+          - **EXAMPLE**: "Korean Air 123, turn left heading 270, descend pligh level 240."`;
+      } 
+      if (['RJ', 'RO'].includes(prefix)) { // Japan
+          return `${base}
+          - **REGION**: Japan (Tokyo Control).
+          - **PHONOLOGY**: Insert vowels between consonant clusters (epenthesis, e.g. 'Ground' -> 'Gurunado'). Merge /l/ and /r/. Pronounce 'h' strongly.
+          - **INTONATION**: Flat pitch contour (monotonic). Very polite but rigid cadence. Staccato.
+          - **EXAMPLE**: "Japan Air 901, rradar contact, prease maintain fright revel three zero zero."`;
+      }
+      if (['WS', 'WM'].includes(prefix)) { // Singapore/Malaysia
+          return `${base}
+          - **REGION**: Singapore/Malaysia (Singapore Radar).
+          - **PHONOLOGY**: Staccato rhythm (clipped vowels). Final consonants often dropped ('flight' -> 'fligh'). Th-stopping (/θ/ becomes /t/).
+          - **INTONATION**: High speed. Sentence-final particles implied by tone. Choppy delivery.
+          - **EXAMPLE**: "Singapore 6, traffic 12 o'clock, 5 miles, no factor. Maintain present heading."`;
+      }
+      if (prefix === 'VT') { // Thailand
+          return `${base}
+          - **REGION**: Thailand (Bangkok Control).
+          - **PHONOLOGY**: Unaspirated stops (p, t, k). Omission of final consonants. /r/ sometimes trilled or dropped.
+          - **INTONATION**: Tonal influence. "Sing-song" quality but softer tone.
+          - **EXAMPLE**: "Thai 442, contact ground one two one decimal niner. Sawasdee."`;
+      }
+      if (prefix1 === 'Z') { // China
+          return `${base}
+          - **REGION**: China (Beijing Control).
+          - **PHONOLOGY**: Difficulty with /th/ (becomes /s/ or /z/). Confusion between /n/ and /l/. Distinct stress on the wrong syllable.
+          - **INTONATION**: Choppy rhythm. Strong, loud projection.
+          - **EXAMPLE**: "Air China 981, turn right heading 090, creal to rand runway 36L."`;
+      }
+      if (prefix1 === 'V') { // India
+          return `${base}
+          - **REGION**: India (Mumbai Control).
+          - **PHONOLOGY**: **Retroflex** /t/ and /d/ (tongue curled back). Merge /v/ and /w/.
+          - **INTONATION**: Distinct musical intonation (rising and falling within words). Very rapid speech rate (140 wpm).
+          - **EXAMPLE**: "Vistara 202, squawk 4321, descend to flight level one zero zero, do not delay."`;
+      }
+      if (prefix1 === 'O') { // Middle East
+          return `${base}
+          - **REGION**: Middle East (Dubai Control).
+          - **PHONOLOGY**: Guttural /h/ and /kh/. Confusion between /p/ and /b/ (e.g., "people" -> "beople"). Trilled /r/.
+          - **INTONATION**: Deep, resonant voice. Deliberate pacing. Simulate radio distance/echo authority.
+          - **EXAMPLE**: "Emirates 5, confirm on board souls? Cleared for take-off runway 12 Reft."`;
+      }
+      if (prefix1 === 'E' || prefix1 === 'L') { // Europe
+          return `${base}
+          - **REGION**: Europe (Euro-English).
+          - **PHONOLOGY**: /th/ becomes /z/ (French) or /s/ (German). H is silent (French) or crisp (German).
+          - **INTONATION**: Rigid, professional, slightly mechanical.`;
+      }
+      if (prefix1 === 'K' || prefix1 === 'C') { // North America
+          return `${base}
+          - **REGION**: North America.
+          - **PHONOLOGY**: Standard American/Canadian aviation English. Flapped /t/.
+          - **INTONATION**: Relaxed, confident, slightly faster (Cowboy style).`;
+      }
+      
+      return "- **ACCENT**: Use Standard ICAO English with a slight regional touch appropriate for the location if known.";
+  }
+
+  async connect(
+      scenario: Scenario, 
+      callbacks: LiveClientCallbacks, 
+      difficulty: DifficultyLevel = DifficultyLevel.LEVEL_4_RECURRENT, 
+      airportCode: string = "",
+      accentEnabled: boolean = false, 
+      cockpitNoiseEnabled: boolean = false, 
+      customSystemInstruction?: string
+  ) {
     // 1. Clean up potential previous sessions or contexts
     await this.disconnect();
     
@@ -200,11 +395,7 @@ export class LiveClient {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     
     try {
-        // We let the system choose the sample rate (usually 44100 or 48000)
-        // We will downsample manually to 16000 before sending to Gemini
         this.inputAudioContext = new AudioContextClass();
-        
-        // Output context for playback (can be higher quality)
         this.outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
     } catch (e) {
         console.warn("Failed to suggest sample rate, falling back to default", e);
@@ -234,8 +425,35 @@ export class LiveClient {
     const outputNode = this.outputAudioContext.createGain();
     outputNode.connect(this.outputAudioContext.destination);
 
+    // 3. START COCKPIT NOISE (If Enabled)
+    this.startCockpitNoise(cockpitNoiseEnabled);
+
     // Dynamic Difficulty Instruction
     const difficultyPrompt = this.getDifficultyInstruction(difficulty);
+
+    // Airport Context Injection Logic
+    let targetCode = airportCode ? airportCode.toUpperCase() : "";
+    if (!targetCode || targetCode === "GENERIC" || targetCode.length < 3) {
+        targetCode = REAL_WORLD_AIRPORTS[Math.floor(Math.random() * REAL_WORLD_AIRPORTS.length)];
+        console.log(`LiveClient: No airport specified. Randomly selected: ${targetCode}`);
+    }
+
+    // Dynamic Voice & Accent
+    const voiceName = this.getVoiceName(targetCode, accentEnabled);
+    const accentPrompt = this.getAccentInstruction(targetCode, accentEnabled);
+    
+    console.log(`LiveClient Config: Airport=${targetCode}, Accent=${accentEnabled}, Voice=${voiceName}`);
+
+    const airportInstruction = `
+    # AIRPORT CONTEXT: ${targetCode}
+    - **LOCATION**: You are acting as ATC at **${targetCode}**.
+    - **REALISM RULE**: You MUST use REAL-WORLD data for ${targetCode} if available in your knowledge base.
+      * Runway designators (e.g. if ZBAA, use 36R/18L, 01/19. If ZSQD, use 17/35).
+      * Standard Taxiway names.
+      * Local SIDs/STARs and geographic fixes.
+    - **ADAPTATION**: Adapt the current scenario (${scenario.title}) to fit the specific layout of ${targetCode}.
+    - **DIVERSION**: If pilot requests diversion, suggest realistic nearby airports for ${targetCode}.
+    `;
 
     const baseInstruction = `
     # ROLE: Senior ICAO English Examiner (Level 4-6) & Senior Air Traffic Controller (20+ years experience)
@@ -251,9 +469,14 @@ export class LiveClient {
     - Details: ${scenario.details}
     - Callsign: "${scenario.callsign}"
 
+    ${airportInstruction}
+
     ${difficultyPrompt}
+    
+    ${accentPrompt}
 
     # BEHAVIOR GUIDELINES:
+    - **VOICE ACTING**: The ACCENT INSTRUCTION above is CRITICAL. Maintain the persona of a local controller at ${targetCode}.
     - Act strictly as ATC. Do not break character unless strictly necessary (or if acting as COACH).
     - If the user makes a readback error, correct them immediately as a real ATC would ("Negative, [correction]").
     - Introduce realistic pauses, radio static simulation (via speech nuances), and urgency matching the situation.
@@ -262,10 +485,8 @@ export class LiveClient {
 
     const finalInstruction = customSystemInstruction || baseInstruction;
 
-    // Wrap the connection logic in a try-catch to handle synchronous SDK errors
     try {
         console.log("Initializing Gemini Live Session...");
-        // Use Gemini 2.5 Flash Native Audio for the real-time interaction
         this.sessionPromise = this.ai.live.connect({
           model: 'gemini-2.5-flash-native-audio-preview-12-2025', 
           callbacks: {
@@ -274,14 +495,12 @@ export class LiveClient {
                 callbacks.onOpen();
             },
             onmessage: async (message: LiveServerMessage) => {
-              // Handle Tool Calls (if model decides to call tool during session)
               if (message.toolCall) {
                 for (const fc of message.toolCall.functionCalls) {
                   if (fc.name === 'reportAssessment') {
                     const rawData = fc.args;
                     const data = safeParseAssessment(rawData);
                     callbacks.onAssessment(data);
-                    // Acknowledge tool call
                     this.sessionPromise?.then((session) => {
                       session.sendToolResponse({
                         functionResponses: {
@@ -295,7 +514,6 @@ export class LiveClient {
                 }
               }
 
-              // Handle Audio Output
               const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
               if (base64Audio && this.outputAudioContext) {
                 if (this.outputAudioContext.state === 'suspended') {
@@ -311,7 +529,6 @@ export class LiveClient {
                   1
                 );
                 
-                // Visualization Data
                 const channelData = audioBuffer.getChannelData(0);
                 let sum = 0;
                 const step = Math.floor(channelData.length / 50) || 1;
@@ -335,18 +552,14 @@ export class LiveClient {
                 this.sources.add(source);
               }
 
-              // --- ROBUST TRANSCRIPT HANDLING ---
-              // User Transcript: Buffer it, don't commit to fullTranscript yet to avoid duplication
               const inputTranscript = message.serverContent?.inputTranscription?.text;
               if (inputTranscript) {
                   this.currentInputPart += inputTranscript; 
                   callbacks.onTranscript(inputTranscript, 'user', true);
               }
 
-              // AI Transcript: Commit buffered user text, then append AI text
               const outputTranscript = message.serverContent?.outputTranscription?.text;
               if (outputTranscript) {
-                  // If we have pending user input, commit it now
                   if (this.currentInputPart.trim()) {
                       this.fullTranscript += `User: ${this.currentInputPart.trim()}\n`;
                       this.currentInputPart = "";
@@ -356,7 +569,6 @@ export class LiveClient {
                   callbacks.onTranscript(outputTranscript, 'ai', false);
               }
 
-              // Turn Complete: Flush any remaining user input buffer
               if (message.serverContent?.turnComplete) {
                 if (this.currentInputPart.trim()) {
                     this.fullTranscript += `User: ${this.currentInputPart.trim()}\n`;
@@ -372,7 +584,6 @@ export class LiveClient {
             },
             onerror: (e: any) => {
               console.error("Gemini Live API Error (Callback):", e);
-              // Ensure we propagate error with a message
               const msg = e.message || "Connection Interrupted";
               callbacks.onError(new Error(msg));
             },
@@ -380,9 +591,8 @@ export class LiveClient {
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName } },
             },
-            // CRITICAL FIX: Enable Transcription
             inputAudioTranscription: {}, 
             outputAudioTranscription: {},
             systemInstruction: finalInstruction,
@@ -390,11 +600,8 @@ export class LiveClient {
           },
         });
 
-        // Initialize session promise
         await this.sessionPromise;
         this.startAudioInputStream();
-        
-        // Removed Kickstart message to prevent Race Condition / Network Error
 
     } catch (e: any) {
         console.error("Failed to initialize session:", e);
@@ -409,23 +616,16 @@ export class LiveClient {
     this.processor = this.inputAudioContext.createScriptProcessor(4096, 1, 1);
 
     const currentSampleRate = this.inputAudioContext.sampleRate;
-    // We will downsample to 16k, so sending as 16k
     const mimeType = 'audio/pcm;rate=16000';
 
     this.processor.onaudioprocess = (e) => {
-      // IMPLEMENTATION UPDATE: Keep-Alive Mechanism
-      // Instead of returning when muted (which stops data flow and causes timeouts),
-      // we send a silent buffer. This keeps the WebSocket connection active.
-      
       const inputData = e.inputBuffer.getChannelData(0);
       let dataToProcess = inputData;
 
       if (this.isInputMuted) {
-          // Fill with zeros (Silence)
           dataToProcess = new Float32Array(inputData.length).fill(0);
       }
       
-      // CRITICAL FIX: Downsample audio to 16kHz before sending
       const downsampledData = downsampleTo16k(dataToProcess, currentSampleRate);
       
       const base64Data = this.float32ToBase64(downsampledData);
@@ -464,28 +664,21 @@ export class LiveClient {
   // --- NEW FINALIZE STRATEGY ---
   async finalize() {
     console.log("Finalizing session...");
-    
-    // CRITICAL FIX 1: Race Condition Prevention
-    // Stop sending new audio, but keep connection open to receive final transcription.
     this.setInputMuted(true); 
     
     console.log("Waiting for trailing transcripts (buffer period)...");
-    await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second buffer
+    await new Promise(resolve => setTimeout(resolve, 2000)); 
 
-    // Flush any remaining input buffer before disconnecting
     if (this.currentInputPart.trim()) {
         this.fullTranscript += `User: ${this.currentInputPart.trim()}\n`;
         this.currentInputPart = "";
     }
 
-    // 1. Now we can disconnect safely
     await this.disconnect();
 
-    // 2. Generate Report using standard GenerateContent API
     if (this.currentCallbacks && this.ai) {
         console.log("Full Transcript for Assessment:", this.fullTranscript);
 
-        // CRITICAL FIX 3: Empty Transcript Protection
         if (!this.fullTranscript.trim() || this.fullTranscript.length < 15) {
              console.warn("Transcript too short for assessment.");
              this.currentCallbacks.onAssessment(safeParseAssessment({
@@ -500,11 +693,9 @@ export class LiveClient {
         }
 
         try {
-            console.log("Generating assessment report using Gemini 3 Flash...");
+            console.log("Generating assessment report using Gemini 3 Pro...");
             const model = this.ai.models;
             
-            // CRITICAL FIX 2: Ground Truth Injection
-            // We explicitely tell the AI what SHOULD have happened vs what ACTUALLY happened.
             const prompt = `
             # ROLE: ICAO English Master Examiner
             # TASK: Assess the following radiotelephony transcript and generate a JSON report.
@@ -550,9 +741,8 @@ export class LiveClient {
             - All explanations in SIMPLIFIED CHINESE (简体中文).
             `;
 
-            // Use Gemini 3 Flash for high quality reasoning and JSON generation
             const response = await model.generateContent({
-                model: 'gemini-3-flash-preview',
+                model: 'gemini-3-pro-preview',
                 contents: prompt,
                 config: {
                     responseMimeType: 'application/json',
@@ -571,7 +761,6 @@ export class LiveClient {
 
         } catch (e) {
             console.error("Report generation failed:", e);
-            // Return fallback error report
             this.currentCallbacks.onAssessment(safeParseAssessment({
                 executiveSummary: { assessment: "Report generation failed due to network or model error.", safetyMargin: "N/A", frictionPoints: "N/A" }
             }));
@@ -581,6 +770,8 @@ export class LiveClient {
 
   async disconnect() {
     console.log("Disconnecting Live Client...");
+    this.stopCockpitNoise();
+
     if (this.sessionPromise) {
         try {
             const session = await this.sessionPromise;

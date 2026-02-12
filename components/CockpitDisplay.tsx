@@ -95,7 +95,7 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario }) => {
              </>
          ) : (
              <div className="flex items-center justify-center h-full text-xs text-ios-subtext font-medium">
-                 System Standby
+                 系统待机 (System Standby)
              </div>
          )}
       </div>

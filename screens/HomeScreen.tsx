@@ -60,9 +60,9 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
   useEffect(() => {
     // 1. Set Greeting
     const hour = new Date().getHours();
-    if (hour < 12) setGreeting('Good Morning, Captain');
-    else if (hour < 18) setGreeting('Good Afternoon, Captain');
-    else setGreeting('Good Evening, Captain');
+    if (hour < 12) setGreeting('早上好, Captain');
+    else if (hour < 18) setGreeting('下午好, Captain');
+    else setGreeting('晚上好, Captain');
 
     // 2. Fetch User Profile
     const loadProfile = async () => {
@@ -187,31 +187,31 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
       switch (weakness) {
           case 'Pronunciation':
               scenarioId = 'medical'; 
-              reason = 'Complex medical terminology requires precise articulation.';
+              reason = '复杂的医疗术语需要更精准的发音。';
               break;
           case 'Structure':
               scenarioId = 'eng_fire'; 
-              reason = 'Standard phraseology structure is critical during engine failures.';
+              reason = '标准用语结构在引擎故障等紧急情况下至关重要。';
               break;
           case 'Vocabulary':
               scenarioId = 'hyd_fail'; 
-              reason = 'Expand your technical vocabulary for aircraft systems.';
+              reason = '建议扩展关于飞机系统的技术词汇。';
               break;
           case 'Fluency':
               scenarioId = 'push_complex'; 
-              reason = 'Practice conditional clearances to improve speech processing speed.';
+              reason = '练习条件性指令以提高语音处理速度。';
               break;
           case 'Comprehension':
               scenarioId = 'taxi_giveway'; 
-              reason = 'Practice listening to complex ground movement instructions.';
+              reason = '加强对复杂地面滑行指令的听力理解。';
               break;
           case 'Interactions':
               scenarioId = 'unruly';
-              reason = 'Practice assertiveness and negotiation in non-routine situations.';
+              reason = '在非正常情况下的自信表达与协商技巧。';
               break;
           default:
               scenarioId = 'eng_fire';
-              reason = 'General proficiency improvement.';
+              reason = '全面提升通话能力。';
       }
 
       // Find the full scenario object
@@ -278,7 +278,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                  </div>
                  <div>
                      <h3 className="font-bold text-gray-800 text-sm mb-1">特情速答挑战</h3>
-                     <p className="text-[10px] text-gray-500 leading-tight">Click to Start. Quick fire vocabulary.</p>
+                     <p className="text-[10px] text-gray-500 leading-tight">Start Practice. Quick fire vocabulary.</p>
                  </div>
              </button>
 
@@ -330,7 +330,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                   <div className="flex-1 w-full">
                      <div className="mb-4">
                          <div className="flex justify-between items-center mb-1">
-                             <span className="text-xs font-bold text-gray-400 uppercase">Weakest Link</span>
+                             <span className="text-xs font-bold text-gray-400 uppercase">薄弱环节 (Weakest)</span>
                              <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded">Level {recommendation.minScore}</span>
                          </div>
                          <h3 className="text-xl font-bold text-ios-text mb-1">{recommendation.weakness}</h3>
@@ -345,7 +345,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                        className="w-full bg-gradient-to-r from-ios-indigo to-purple-600 text-white p-3 rounded-xl shadow-lg shadow-indigo-200 hover:shadow-indigo-300 active:scale-95 transition-all flex items-center justify-between group"
                      >
                          <div className="flex flex-col text-left">
-                             <span className="text-[10px] text-indigo-200 font-bold uppercase">One-Click Improve</span>
+                             <span className="text-[10px] text-indigo-200 font-bold uppercase">一键专项提升</span>
                              <span className="text-sm font-bold truncate max-w-[150px]">{recommendation.recommendedScenario.title}</span>
                          </div>
                          <div className="bg-white/20 p-2 rounded-full group-hover:bg-white/30 transition-colors">
@@ -428,7 +428,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                   {/* Content */}
                   <div className="p-6 overflow-y-auto space-y-6 flex-1">
                       <div>
-                          <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest mb-3">Transcript Highlight</h3>
+                          <h3 className="text-sm font-bold text-gray-900 uppercase tracking-widest mb-3">对话重点 (Transcript Highlight)</h3>
                           <div className="space-y-3 max-h-[200px] overflow-y-auto scroll-smooth pr-1" ref={transcriptRef}>
                               {DAILY_CASE_STUDY.transcript.map((line, idx) => (
                                   <div 
@@ -449,7 +449,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                       <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-100">
                           <h4 className="text-xs font-bold text-yellow-800 uppercase mb-2 flex items-center">
                               <svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                              Learning Point
+                              学习要点 (Learning Point)
                           </h4>
                           <p className="text-sm text-yellow-900 leading-relaxed">
                               {DAILY_CASE_STUDY.learningPoint}
@@ -462,7 +462,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                         onClick={handleCaseStudyPractice}
                         className="w-full py-3 bg-ios-text text-white rounded-xl font-bold shadow-lg active:scale-[0.98] transition-transform"
                       >
-                          Practice Related Scenario
+                          练习相关场景
                       </button>
                   </div>
               </div>
