@@ -9,6 +9,7 @@ import Transcript from '../components/Transcript';
 import AssessmentReport from '../components/AssessmentReport';
 import HistoryModal from '../components/HistoryModal';
 import { userService } from '../services/userService';
+import { useWakeLock } from '../hooks/useWakeLock';
 
 // UPDATED: 6-Stage Logical Phases
 const PHASES: FlightPhase[] = [
@@ -43,6 +44,10 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  // --- PREVENT SCREEN SLEEP ---
+  const isSessionActive = status === ConnectionStatus.CONNECTING || status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING;
+  useWakeLock(isSessionActive);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -154,6 +159,14 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
       );
   };
 
+  const handleReconnect = async () => {
+    if (activeScenario) {
+       startTraining(activeScenario);
+    } else {
+       setView('dashboard');
+    }
+  };
+
   const startTraining = async (scenario: Scenario) => {
     if (!API_KEY) {
        alert("API Key missing. Please check settings.");
@@ -162,7 +175,14 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
     setActiveScenario(scenario);
     setView('session');
     setStatus(ConnectionStatus.CONNECTING);
-    setMessages([]);
+    // Don't clear messages on reconnect if it's a resume-like action (though currently we just restart the session context for stability)
+    // setMessages([]); 
+    // To properly support resuming with history, we'd need to inject history into Gemini context which isn't fully supported in Live API yet.
+    // So we restart the session but keep the scenario.
+    if (status !== ConnectionStatus.ERROR) {
+       setMessages([]);
+    }
+    
     setAssessment(null);
     setErrorMsg(null);
     startTimeRef.current = Date.now();
@@ -208,9 +228,11 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
              return;
          }
          
-         // If manual close or error, go back to dashboard
-         setView('dashboard');
-         setStatus(ConnectionStatus.DISCONNECTED);
+         // If manual close or error, go back to dashboard unless it was an error
+         if (statusRef.current !== ConnectionStatus.ERROR) {
+             setView('dashboard');
+             setStatus(ConnectionStatus.DISCONNECTED);
+         }
       },
       onError: (err) => {
           setStatus(ConnectionStatus.ERROR);
@@ -519,9 +541,20 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({ initialScenario, onCons
                 <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
                   <h3 className="text-ios-text font-bold text-lg mb-2">Connection Failed</h3>
                   <p className="text-ios-subtext text-sm mb-6 max-w-xs">{errorMsg}</p>
-                  <button onClick={() => setView('dashboard')} className="px-6 py-2 bg-ios-red text-white rounded-full text-sm font-semibold shadow-lg">
-                    Back to Dashboard
-                  </button>
+                   <div className="flex space-x-3">
+                    <button 
+                        onClick={() => setView('dashboard')}
+                        className="px-6 py-2 bg-gray-200 text-gray-700 rounded-full text-sm font-semibold hover:bg-gray-300 transition-all"
+                    >
+                        Dashboard
+                    </button>
+                    <button 
+                        onClick={handleReconnect}
+                        className="px-6 py-2 bg-ios-red text-white rounded-full text-sm font-semibold shadow-lg hover:shadow-ios-red/30 transition-all"
+                    >
+                        Resume Session
+                    </button>
+                  </div>
                 </div>
               )}
 

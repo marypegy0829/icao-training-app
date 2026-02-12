@@ -10,6 +10,7 @@ import AssessmentReport from '../components/AssessmentReport';
 import BriefingModal from '../components/BriefingModal';
 import HistoryModal from '../components/HistoryModal';
 import { userService } from '../services/userService';
+import { useWakeLock } from '../hooks/useWakeLock';
 
 interface AssessmentScreenProps {
   difficulty: DifficultyLevel;
@@ -30,6 +31,11 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
   const [isTransmitting, setIsTransmitting] = useState(false);
 
   const liveClientRef = useRef<LiveClient | null>(null);
+
+  // --- PREVENT SCREEN SLEEP ---
+  // Activate wake lock when status is NOT Disconnected, Error, or Analyzing (allow sleep during report reading if needed, but safer to keep on if connected)
+  const isSessionActive = status === ConnectionStatus.BRIEFING || status === ConnectionStatus.CONNECTING || status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING;
+  useWakeLock(isSessionActive);
   
   // Connection Watchdog Timer
   useEffect(() => {
@@ -142,6 +148,15 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
      setScenario(s);
      setStatus(ConnectionStatus.BRIEFING);
      setErrorMsg(null);
+  };
+
+  // Re-connect logic without changing scenario
+  const handleReconnect = async () => {
+    if (scenario) {
+      handleConnect();
+    } else {
+      startBriefing();
+    }
   };
 
   const handleConnect = async () => {
@@ -386,7 +401,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                 {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">Connecting...</span>}
             </div>
             
-            {/* Error Overlay */}
+            {/* Error Overlay with Retry */}
             {status === ConnectionStatus.ERROR && errorMsg && (
               <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
                 <div className="w-12 h-12 bg-ios-red/10 rounded-full flex items-center justify-center mb-4">
@@ -396,9 +411,20 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty }) => {
                 </div>
                 <h3 className="text-ios-text font-bold text-lg mb-2">Connection Failed</h3>
                 <p className="text-ios-subtext text-sm mb-6 max-w-xs">{errorMsg}</p>
-                <button onClick={startBriefing} className="px-6 py-2 bg-ios-red text-white rounded-full text-sm font-semibold shadow-lg hover:shadow-ios-red/30 transition-all">
-                  Retry
-                </button>
+                <div className="flex space-x-3">
+                  <button 
+                    onClick={() => setStatus(ConnectionStatus.DISCONNECTED)}
+                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-full text-sm font-semibold hover:bg-gray-300 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleReconnect}
+                    className="px-6 py-2 bg-ios-red text-white rounded-full text-sm font-semibold shadow-lg hover:shadow-ios-red/30 transition-all"
+                  >
+                    Resume Session
+                  </button>
+                </div>
               </div>
             )}
 

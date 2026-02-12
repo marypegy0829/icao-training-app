@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type, Tool, Schema } from '@google/genai';
 import { base64ToBytes, decodeAudioData, downsampleTo16k } from './audioUtils';
 import { AssessmentData, Scenario, DifficultyLevel } from '../types';
@@ -371,7 +372,8 @@ export class LiveClient {
             },
             onerror: (e: any) => {
               console.error("Gemini Live API Error (Callback):", e);
-              const msg = e.message || "Connection Error";
+              // Ensure we propagate error with a message
+              const msg = e.message || "Connection Interrupted";
               callbacks.onError(new Error(msg));
             },
           },
@@ -411,12 +413,20 @@ export class LiveClient {
     const mimeType = 'audio/pcm;rate=16000';
 
     this.processor.onaudioprocess = (e) => {
-      if (this.isInputMuted) return;
-
+      // IMPLEMENTATION UPDATE: Keep-Alive Mechanism
+      // Instead of returning when muted (which stops data flow and causes timeouts),
+      // we send a silent buffer. This keeps the WebSocket connection active.
+      
       const inputData = e.inputBuffer.getChannelData(0);
+      let dataToProcess = inputData;
+
+      if (this.isInputMuted) {
+          // Fill with zeros (Silence)
+          dataToProcess = new Float32Array(inputData.length).fill(0);
+      }
       
       // CRITICAL FIX: Downsample audio to 16kHz before sending
-      const downsampledData = downsampleTo16k(inputData, currentSampleRate);
+      const downsampledData = downsampleTo16k(dataToProcess, currentSampleRate);
       
       const base64Data = this.float32ToBase64(downsampledData);
       
