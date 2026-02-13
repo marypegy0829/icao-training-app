@@ -74,7 +74,7 @@ function safeParseAssessment(data: any): AssessmentData {
 const assessmentSchema: Schema = {
   type: Type.OBJECT,
   properties: {
-    overallScore: { type: Type.NUMBER, description: "Overall ICAO Level (Integer 1-6)." },
+    overallScore: { type: Type.NUMBER, description: "The LOWEST score among the 6 dimensions (ICAO Rule)." },
     pronunciation: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
     structure: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
     vocabulary: { type: Type.NUMBER, description: "Score (Integer 1-6)." },
@@ -87,7 +87,7 @@ const assessmentSchema: Schema = {
       properties: {
         assessment: { type: Type.STRING, description: "Comprehensive summary in Simplified Chinese (150+ words)." },
         safetyMargin: { type: Type.STRING, description: "Assessment of safety risks due to language (Chinese)." },
-        frictionPoints: { type: Type.STRING, description: "Specific instances of communication breakdown (Chinese)." }
+        frictionPoints: { type: Type.STRING, description: "The 'Lowest Driving Factor' that caused the score (Chinese)." }
       },
       required: ["assessment", "safetyMargin", "frictionPoints"]
     },
@@ -95,27 +95,27 @@ const assessmentSchema: Schema = {
     dimensionalDetails: {
       type: Type.OBJECT,
       properties: {
-        pronunciation: { type: Type.STRING, description: "Detailed analysis of accent, stress, and intonation (Chinese)." },
-        structure: { type: Type.STRING, description: "Analysis of grammatical errors and sentence patterns (Chinese)." },
-        vocabulary: { type: Type.STRING, description: "Analysis of phraseology usage and vocabulary range (Chinese)." },
-        fluency: { type: Type.STRING, description: "Analysis of tempo, hesitation, and discourse markers (Chinese)." },
-        comprehension: { type: Type.STRING, description: "Analysis of understanding and readback accuracy (Chinese)." },
-        interactions: { type: Type.STRING, description: "Analysis of response time and clarification handling (Chinese)." }
+        pronunciation: { type: Type.STRING, description: "Detailed analysis of accent interference (Chinese)." },
+        structure: { type: Type.STRING, description: "Global vs Local errors analysis (Chinese)." },
+        vocabulary: { type: Type.STRING, description: "Paraphrasing capability analysis (Chinese)." },
+        fluency: { type: Type.STRING, description: "Processing speed & fillers analysis (Chinese)." },
+        comprehension: { type: Type.STRING, description: "Handling complications analysis (Chinese)." },
+        interactions: { type: Type.STRING, description: "Check/Confirm/Clarify analysis (Chinese)." }
       },
       required: ["pronunciation", "structure", "vocabulary", "fluency", "comprehension", "interactions"]
     },
 
     deepAnalysis: {
       type: Type.ARRAY,
-      description: "List of 3-5 specific errors found in the transcript. MUST cite exact user words.",
+      description: "Evidence Log of specific errors. MUST cite exact user words.",
       items: {
         type: Type.OBJECT,
         properties: {
-          context: { type: Type.STRING, description: "The EXACT quote from the 'User' in the transcript that contains the error." },
-          issue: { type: Type.STRING, description: "Identify the error type (e.g., [STRUCTURE] Wrong preposition, [PRONUNCIATION] Mispronounced 'Altimeter')." },
-          theory: { type: Type.STRING, description: "Explain WHY it is wrong based on ICAO Doc 9835 (Chinese)." },
+          context: { type: Type.STRING, description: "Transcript Quote: 'User said: ...'" },
+          issue: { type: Type.STRING, description: "Error Type (e.g., [STRUCTURE] Global Error)." },
+          theory: { type: Type.STRING, description: "Why this is a failure based on ICAO 9835 (Chinese)." },
           rootCause: { type: Type.STRING, description: "Likely cause (L1 interference, lack of practice) (Chinese)." },
-          correction: { type: Type.STRING, description: "The correct standard phraseology or sentence (English)." }
+          correction: { type: Type.STRING, description: "The correct standard phraseology (English)." }
         },
         required: ["context", "issue", "theory", "rootCause", "correction"]
       }
@@ -123,7 +123,7 @@ const assessmentSchema: Schema = {
 
     remedialPlan: {
       type: Type.ARRAY,
-      description: "3 Actionable, specific training exercises (Chinese).",
+      description: "3 specific Training Prescriptions based on the lowest score (Chinese).",
       items: { type: Type.STRING }
     }
   },
@@ -138,6 +138,38 @@ const assessmentToolDefinition: FunctionDeclaration = {
 };
 
 const tools: Tool[] = [{ functionDeclarations: [assessmentToolDefinition] }];
+
+// --- ICAO DOC 9835 PRONUNCIATION STANDARDS ---
+const ICAO_PRONUNCIATION_GUIDE = `
+### **ICAO DOC 9835 PRONUNCIATION STANDARDS (MANDATORY)**
+You MUST adhere to the following ICAO Radiotelephony spelling alphabet and pronunciation guide. 
+DO NOT use standard English pronunciation for the following numbers and terms.
+
+**1. NUMBERS (CRITICAL)**
+*   **0**: ZE-RO (Stress 1st syllable)
+*   **1**: WUN (Strong, sharp)
+*   **2**: TOO (Sharp 'T')
+*   **3**: **TREE** (NO 'Th' sound. Like a tree in a forest.)
+*   **4**: **FOW-er** (Two distinct syllables. Not 'For'.)
+*   **5**: **FIFE** (Hard 'F' at the end. Not 'Five'.)
+*   **6**: SIX
+*   **7**: SEV-en
+*   **8**: AIT
+*   **9**: **NIN-er** (Two syllables. Stress 1st. Ends with 'er'.)
+*   **Decimal**: **DAY-SEE-MAL** (Do NOT say "Point".)
+*   **Thousand**: **TOU-SAND** (No 'Th' sound.)
+
+**2. ALPHABET**
+Use standard NATO/ICAO phonetics: Alpha, Bravo, Charlie, Delta, Echo, Foxtrot, Golf, Hotel, India, Juliet, Kilo, Lima, Mike, November, Oscar, Papa, Quebec, Romeo, Sierra, Tango, Uniform, Victor, Whiskey, X-ray, Yankee, Zulu.
+
+**3. TRANSMISSION TECHNIQUE**
+*   **Digit-by-Digit**: Frequencies, Headings, Runways, and Wind direction MUST be spoken digit-by-digit.
+    *   *Example*: "Heading 300" -> "Heading **TREE ZE-RO ZE-RO**" (NOT "Three Hundred").
+    *   *Example*: "Runway 09" -> "Runway **ZE-RO NIN-er**".
+    *   *Example*: "QNH 1013" -> "QNH **WUN ZE-RO WUN TREE**".
+    *   *Exception*: Flight Levels can be spoken as hundreds if ending in 00 (e.g. "Flight Level Three Hundred" is occasionally acceptable in some regions, but ICAO prefers "Flight Level **TREE ZE-RO ZE-RO**". **Stick to digits**).
+*   **Rate of Speech**: Maintain approx 100 words per minute. Pause slightly before and after numbers.
+`;
 
 export class LiveClient {
   private ai: GoogleGenAI;
@@ -234,7 +266,7 @@ export class LiveClient {
           case DifficultyLevel.LEVEL_3_TO_4:
               return `
               - **DIFFICULTY: LOW (Level 3-4 Upgrade)**.
-              - SPEECH: Speak SLOWLY and CLEARLY. Articulate every word.
+              - SPEECH: Speak SLOWLY and CLEARLY. Articulate every word strictly according to ICAO.
               - VOCABULARY: Use strictly standard ICAO phraseology. Avoid idioms.
               - ATTITUDE: Be helpful and patient. Correct errors gently if needed.
               - COMPLEXITY: Keep instructions simple (single step).
@@ -315,7 +347,7 @@ export class LiveClient {
       if (prefix1 === 'Z') { // China
           return `${base}
 ### **🌏 REGION Z (China) - "Beijing/Shanghai Control"**
-* **Phonology**: /θ/ -> /s/ (Three->Sree), Final consonants swallowed.
+* **Phonology**: /θ/ -> /s/ (Tree->Sree), Final consonants swallowed.
 * **Prosody**: Staccato, forceful, high volume.
 * **Lexical**: Strict use of "Decimal", "Standby".
 * **Example**: "Air China 981, radar contact. Turn right heading 090."`;
@@ -553,6 +585,8 @@ export class LiveClient {
 
     // Extract dynamic environment settings to be reusable
     const environmentContext = `
+    ${ICAO_PRONUNCIATION_GUIDE}
+
     ${airportInstruction}
 
     ${difficultyPrompt}
@@ -584,6 +618,7 @@ export class LiveClient {
     2. **Correction Logic**:
        - If the pilot fails to understand a critical number (Heading/Altitude) due to the accent, you must **NOT** drop the accent. 
        - Instead, use the ICAO technique of saying "I say again" and speaking strictly **digit-by-digit**.
+       - Monitor the pilot's pronunciation. If they fail to say "Niner", "Tree", or "Fife", correct them gently at the end of the exchange or if it causes confusion.
 
     3. **Emergency/Unexpected**:
        - Occasionally inject "Garbled transmission" simulation (e.g., *[Static]... turn left... [Static]... zero five zero*).
@@ -815,48 +850,70 @@ export class LiveClient {
             const model = this.ai.models;
             
             const prompt = `
-            # ROLE: ICAO English Master Examiner
-            # TASK: Assess the following radiotelephony transcript and generate a JSON report.
+            # Role: Senior ICAO Language Proficiency Examiner & Boeing Check Airman
+            # Task: Assess Pilot Aviation English Competency
             
-            # SCENARIO CONTEXT (THE "GROUND TRUTH"):
-            - Scenario Title: ${this.scenarioContext?.title}
-            - Situation Details: ${this.scenarioContext?.details}
-            - Weather Conditions: ${this.scenarioContext?.weather}
-            - Callsign: ${this.scenarioContext?.callsign}
-            - Flight Phase: ${this.scenarioContext?.phase}
-            
-            # TRANSCRIPT (ACTUAL PERFORMANCE):
+            ## 1. MISSION PROFILE
+            Analyze the following pilot transcript according to ICAO Doc 9835.
+            **CRITICAL RULE:** The final 'overallScore' is NOT an average. It is the **LOWEST** score among the 6 descriptors. (e.g. 5,5,5,5,5,3 => Overall 3).
+
+            ## 2. DETAILED SCORING MATRIX (ICAO STANDARDS)
+
+            ### A. PRONUNCIATION (发音)
+            - **Level 6:** Native or near-native.
+            - **Level 5:** Accent exists but **rarely** interferes with understanding.
+            - **Level 4 (Pass):** Accent evident, **sometimes** interferes but intelligible.
+            - **Level 3 (Fail):** Frequently interferes. Requires constant repetition.
+            - **ICAO Specifics:** Check for correct pronunciation of numbers (TREE, FIFE, NINER) and standard alphabet.
+
+            ### B. STRUCTURE (结构/语法)
+            - **Level 6:** Complex structures well controlled.
+            - **Level 5:** Basic well controlled. Complex attempted with errors but meaning preserved.
+            - **Level 4 (Pass):** Errors in **unexpected circumstances** but rare meaning loss.
+            - **Level 3 (Fail):** Basic structures break down. Errors interfere with meaning.
+
+            ### C. VOCABULARY (词汇)
+            - **Level 6:** Idiomatic, nuanced.
+            - **Level 5:** Wide variety.
+            - **Level 4 (Pass):** Sufficient for work topics. **CRITICAL: Can PARAPHRASE successfully** when lacking vocabulary.
+            - **Level 3 (Fail):** Limited. **Unable to paraphrase**.
+
+            ### D. FLUENCY (流利度)
+            - **Level 6:** Natural, effortless.
+            - **Level 5:** Relative ease. Uses markers effectively.
+            - **Level 4 (Pass):** Appropriate tempo. Fillers not distracting.
+            - **Level 3 (Fail):** Hesitations/slow processing prevent communication. Distracting fillers.
+
+            ### E. COMPREHENSION (理解能力)
+            - **Level 6:** Accurate in all contexts.
+            - **Level 5:** Accurate in unexpected events.
+            - **Level 4 (Pass):** Mostly accurate. Slower in **complications**.
+            - **Level 3 (Fail):** Fails to understand unexpected events.
+
+            ### F. INTERACTIONS (互动能力)
+            - **Level 6:** Ease/Sensitive to cues.
+            - **Level 5:** Immediate/informative.
+            - **Level 4 (Pass):** Maintains exchanges. Deals with misunderstandings by **checking/confirming**.
+            - **Level 3 (Fail):** Slow/inappropriate. Gives up.
+
+            ## 3. CHECK AIRMAN'S "FAIL" TRIGGERS
+            Downgrade immediately if:
+            1. **Safety Hazard:** Confuses critical instructions (Left/Right, Climb/Descend) without correcting.
+            2. **Silence:** Freezes during unexpected events.
+            3. **Script Dependency:** Can only use standard phraseology, fails plain English.
+
+            ## 4. INPUT TRANSCRIPT
             ${this.fullTranscript}
+
+            ## 5. OUTPUT INSTRUCTION (JSON MAPPING)
+            Map your rigorous analysis to the following JSON structure.
+            **IMPORTANT:** All explanations/notes must be in **SIMPLIFIED CHINESE (简体中文)**.
             
-            # ASSESSMENT GUIDELINES:
-            1. **FACTUAL ACCURACY CHECK (CRITICAL)**: 
-               - Compare the transcript against the SCENARIO CONTEXT.
-               - Did the pilot correctly read back numbers (headings, altitudes, QNH)? 
-               - Did they follow the specific instructions implied by the scenario?
-               - **RULE:** If the pilot made a factual error (e.g., wrong turn direction, wrong altitude) that affects safety, the score MUST be 3 or lower, regardless of grammar.
-               
-            2. **FORENSIC LINGUISTICS**: 
-               - Quote specific words the user said in the 'deepAnalysis' section.
-            
-            3. **SCORING**: Use the ICAO holistic descriptors (1-6).
-               - Level 6: Native-like, nuance, no errors.
-               - Level 4: Operational, some errors but safe.
-               - Level 3: Frequent errors, misunderstandings, safety risk.
-            
-            # DEEP ANALYSIS INSTRUCTIONS:
-            - Identify 3-5 specific moments where the user's speech could be improved.
-            - CATEGORIZE EACH ERROR: [STRUCTURE], [PRONUNCIATION], [VOCABULARY], [FLUENCY], [COMPREHENSION-FACTUAL].
-            - Example:
-              {
-                "context": "User: Turning right heading 180.",
-                "issue": "[COMPREHENSION-FACTUAL] Wrong direction",
-                "correction": "Turn left heading 180",
-                "theory": "User failed to comprehend the directional instruction from ATC, posing a collision risk."
-              }
-            
-            # JSON FORMAT:
-            - Strict JSON. No markdown code blocks.
-            - All explanations in SIMPLIFIED CHINESE (简体中文).
+            - **overallScore**: The Integer result of the LOWEST dimension.
+            - **executiveSummary.frictionPoints**: Identify the "Lowest Driving Factor" (e.g. "词汇量不足导致无法复述").
+            - **dimensionalDetails**: Provide specific notes for each of the 6 dimensions.
+            - **deepAnalysis**: Map your 'Evidence Log' here. For each error found, provide the 'context' (quote), 'issue' (type), 'theory' (why it's wrong), and 'correction'.
+            - **remedialPlan**: Provide 3 specific training prescriptions.
             `;
 
             const response = await model.generateContent({

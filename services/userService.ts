@@ -25,6 +25,20 @@ export interface UserProfile {
     skills: Skills;
 }
 
+// Interface for the new SQL View
+interface CompetencyView {
+    user_id: string;
+    total_assessments: number;
+    avg_pronunciation: number;
+    avg_structure: number;
+    avg_vocabulary: number;
+    avg_fluency: number;
+    avg_comprehension: number;
+    avg_interactions: number;
+    last_status: boolean;
+    last_assessment_date: string;
+}
+
 export type SessionType = 'TRAINING' | 'ASSESSMENT';
 
 export const userService = {
@@ -39,20 +53,52 @@ export const userService = {
         const uid = await this.getCurrentUserId();
         if (!uid) return null;
 
-        const { data, error } = await supabase
+        // 1. Fetch Basic Profile
+        const { data: profileData, error: profileError } = await supabase
             .from('profiles')
             .select('*')
             .eq('user_id', uid)
             .single();
 
-        if (error) {
-             if (error.code !== 'PGRST116') { // PGRST116 is 'not found'
-                 console.error('Error fetching profile:', error);
+        if (profileError) {
+             if (profileError.code !== 'PGRST116') { // PGRST116 is 'not found'
+                 console.error('Error fetching profile:', profileError);
              }
              return null;
         }
 
-        return data as UserProfile;
+        let finalProfile = profileData as UserProfile;
+
+        // 2. Fetch Accurate Stats from SQL View (The Source of Truth for Assessments)
+        try {
+            const { data: statsData, error: statsError } = await supabase
+                .from('pilot_competency_view')
+                .select('*')
+                .eq('user_id', uid)
+                .maybeSingle(); // Use maybeSingle() as new users won't have a row in the view yet
+
+            if (statsData) {
+                const stats = statsData as CompetencyView;
+                // Override the loosely kept JSON skills with the hard calculated SQL averages
+                // Ensure we format to 1 decimal place to match UI expectations
+                finalProfile.skills = {
+                    Pronunciation: Number(stats.avg_pronunciation) || 3.0,
+                    Structure: Number(stats.avg_structure) || 3.0,
+                    Vocabulary: Number(stats.avg_vocabulary) || 3.0,
+                    Fluency: Number(stats.avg_fluency) || 3.0,
+                    Comprehension: Number(stats.avg_comprehension) || 3.0,
+                    Interactions: Number(stats.avg_interactions) || 3.0
+                };
+                
+                // Optionally update the cached current_icao_level based on the calculated Lowest Driving Factor from the DB?
+                // For now, we trust the profile's current_icao_level as it represents the "Latest Certified Level", 
+                // whereas the view is an "Average Performance".
+            }
+        } catch (e) {
+            console.warn("Failed to sync with pilot_competency_view", e);
+        }
+
+        return finalProfile;
     },
 
     // Create a new profile (Used during registration)
@@ -83,8 +129,6 @@ export const userService = {
         };
 
         // FIX: Use upsert instead of insert.
-        // If a profile with this user_id already exists (e.g. partial creation or double submit),
-        // we simply update it with the submitted data instead of crashing.
         const { error } = await supabase
             .from('profiles')
             .upsert(newProfile, { onConflict: 'user_id' });
@@ -126,7 +170,7 @@ export const userService = {
         const durationStr = `${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`;
         const score = assessment ? assessment.overallScore : 0;
 
-        // 1. Insert Report into 'training_logs'
+        // 1. Insert Report into 'training_logs' with structured scoring columns
         const { error: logError } = await supabase
             .from('training_logs')
             .insert({
@@ -136,13 +180,23 @@ export const userService = {
                 score: score,
                 duration: durationStr,
                 duration_seconds: durationSeconds,
-                session_type: sessionType, // Store the type
-                details: assessment
+                session_type: sessionType,
+                details: assessment, // Keep JSONB for UI rendering details
+                // --- New Structured Fields for SQL Analytics ---
+                score_pronunciation: assessment?.pronunciation || null,
+                score_structure: assessment?.structure || null,
+                score_vocabulary: assessment?.vocabulary || null,
+                score_fluency: assessment?.fluency || null,
+                score_comprehension: assessment?.comprehension || null,
+                score_interactions: assessment?.interactions || null,
+                is_operational: assessment ? (assessment.overallScore >= 4) : false,
+                fail_reason: assessment?.executiveSummary?.frictionPoints || null
             });
 
         if (logError) console.error('Error saving report:', logError);
 
         // 2. Update Profile Stats
+        // Note: We still perform this update as a fallback/cache, but getProfile now prioritizes the View.
         const currentProfile = await this.getProfile();
         if (currentProfile) {
             const flightTimeHours = durationSeconds / 3600;
@@ -151,7 +205,8 @@ export const userService = {
             let newSkills: Skills = currentProfile.skills;
             
             if (assessment) {
-                // Simple weighted average (80% old, 20% new) to show progression but avoid volatility
+                // Simple weighted average logic retained for immediate UI updates if view is lagging,
+                // though getProfile() will fix it on next load.
                 const updateSkill = (oldVal: any, newVal: number) => {
                     const numOld = typeof oldVal === 'number' ? oldVal : 3;
                     return parseFloat((numOld * 0.8 + newVal * 0.2).toFixed(1));
@@ -173,7 +228,11 @@ export const userService = {
                     flight_hours: Number(currentProfile.flight_hours || 0) + flightTimeHours,
                     total_sorties: (currentProfile.total_sorties || 0) + 1,
                     streak: (currentProfile.streak || 0) + 1, 
-                    skills: newSkills
+                    skills: newSkills,
+                    // If it's an assessment, update current level immediately if passed
+                    ...(sessionType === 'ASSESSMENT' && assessment && assessment.overallScore >= 4 
+                        ? { current_icao_level: assessment.overallScore } 
+                        : {})
                 })
                 .eq('user_id', uid);
 
