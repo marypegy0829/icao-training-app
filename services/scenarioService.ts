@@ -35,6 +35,7 @@ export const scenarioService = {
             phase: item.phase as FlightPhase,
             category: item.category,
             weather: item.weather,
+            difficulty_level: item.difficulty_level, // Map difficulty
             callsign: 'Training ' + Math.floor(Math.random() * 900 + 100)
         }));
 

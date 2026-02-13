@@ -1,16 +1,21 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from './services/supabaseClient';
+import { userService } from './services/userService';
 import AssessmentScreen from './screens/AssessmentScreen';
 import HomeScreen from './screens/HomeScreen';
 import TrainingScreen from './screens/TrainingScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AuthScreen from './screens/AuthScreen';
+import CompleteProfileScreen from './screens/CompleteProfileScreen';
+import { GlobalHeader } from './components/GlobalHeader'; // Import Header
 import { Tab, Scenario, DifficultyLevel } from './types';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [profileComplete, setProfileComplete] = useState<boolean>(false);
+  const [checkingProfile, setCheckingProfile] = useState<boolean>(false);
 
   // App Tabs State
   const [currentTab, setCurrentTab] = useState<Tab>('home'); 
@@ -21,11 +26,34 @@ const App: React.FC = () => {
   const [accentEnabled, setAccentEnabled] = useState<boolean>(false); 
   const [cockpitNoise, setCockpitNoise] = useState<boolean>(true); // New Noise State
 
+  // Helper to check profile status
+  const checkProfile = async () => {
+      setCheckingProfile(true);
+      try {
+          const profile = await userService.getProfile();
+          // Assume profile is complete if a name exists (as it's required)
+          if (profile && profile.name) {
+              setProfileComplete(true);
+          } else {
+              setProfileComplete(false);
+          }
+      } catch (e) {
+          console.error("Profile check failed", e);
+          setProfileComplete(false);
+      } finally {
+          setCheckingProfile(false);
+      }
+  };
+
   useEffect(() => {
     // 1. Check active session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      setLoading(false);
+      if (session) {
+          checkProfile().then(() => setLoading(false));
+      } else {
+          setLoading(false);
+      }
     });
 
     // 2. Listen for auth changes
@@ -33,6 +61,12 @@ const App: React.FC = () => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      if (session) {
+          // Re-check profile on login events
+          checkProfile();
+      } else {
+          setProfileComplete(false);
+      }
       if (_event === 'PASSWORD_RECOVERY') {
          // Optionally handle password recovery UI specifically here
       }
@@ -64,10 +98,20 @@ const App: React.FC = () => {
     setCurrentTab('training');
   };
 
-  if (loading) {
+  // NEW: Handler for profile completion to avoid reload logic
+  const handleProfileComplete = () => {
+      setProfileComplete(true);
+      // Optionally run a background check to sync exact data, but let user in immediately
+      checkProfile();
+  };
+
+  if (loading || checkingProfile) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-ios-bg">
-         <div className="w-8 h-8 border-4 border-ios-blue border-t-transparent rounded-full animate-spin"></div>
+         <div className="flex flex-col items-center space-y-4">
+            <div className="w-8 h-8 border-4 border-ios-blue border-t-transparent rounded-full animate-spin"></div>
+            {checkingProfile && <p className="text-xs text-gray-400">Verifying Pilot Profile...</p>}
+         </div>
       </div>
     );
   }
@@ -75,6 +119,11 @@ const App: React.FC = () => {
   // Render Auth Screen if not logged in
   if (!session) {
     return <AuthScreen />;
+  }
+
+  // Render Complete Profile Screen if logged in but no profile
+  if (!profileComplete) {
+      return <CompleteProfileScreen onComplete={handleProfileComplete} />;
   }
 
   // --- Main App Renderer ---
@@ -120,13 +169,16 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-full flex flex-col bg-ios-bg font-sans text-ios-text selection:bg-ios-blue/20">
       
-      {/* Content Area */}
-      <div className="flex-1 overflow-hidden relative">
+      {/* Global Header */}
+      <GlobalHeader />
+
+      {/* Content Area with Top Padding for Header */}
+      <div className="flex-1 overflow-hidden relative pt-[48px]">
         {renderScreen()}
       </div>
 
       {/* Bottom Tab Bar */}
-      <div className="h-16 bg-white/90 backdrop-blur-md border-t border-gray-200 shrink-0 flex items-center justify-around pb-safe">
+      <div className="h-16 bg-white/90 backdrop-blur-md border-t border-gray-200 shrink-0 flex items-center justify-around pb-safe z-50">
         
         {/* Home Tab */}
         <button 

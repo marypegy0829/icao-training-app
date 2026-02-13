@@ -60,6 +60,7 @@ export const userService = {
         const uid = await this.getCurrentUserId();
         if (!uid) throw new Error("No authenticated user session found. Please login first.");
 
+        // Define the profile object
         const newProfile = {
             user_id: uid,
             name: profileData.name || 'Pilot',
@@ -67,6 +68,7 @@ export const userService = {
             aircraft_type: profileData.aircraft_type || '',
             flight_level: profileData.flight_level || 'Cadet',
             current_icao_level: profileData.current_icao_level || 4,
+            // Default stats for new profile
             flight_hours: 0,
             total_sorties: 0,
             streak: 0,
@@ -80,7 +82,13 @@ export const userService = {
             }
         };
 
-        const { error } = await supabase.from('profiles').insert(newProfile);
+        // FIX: Use upsert instead of insert.
+        // If a profile with this user_id already exists (e.g. partial creation or double submit),
+        // we simply update it with the submitted data instead of crashing.
+        const { error } = await supabase
+            .from('profiles')
+            .upsert(newProfile, { onConflict: 'user_id' });
+
         if (error) throw error;
         return newProfile;
     },

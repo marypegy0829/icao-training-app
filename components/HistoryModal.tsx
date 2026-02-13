@@ -6,11 +6,13 @@ import { AssessmentData } from '../types';
 interface HistoryModalProps {
   onClose: () => void;
   onSelectReport: (data: AssessmentData) => void;
+  initialFilter?: 'ALL' | 'TRAINING' | 'ASSESSMENT';
 }
 
-const HistoryModal: React.FC<HistoryModalProps> = ({ onClose, onSelectReport }) => {
+const HistoryModal: React.FC<HistoryModalProps> = ({ onClose, onSelectReport, initialFilter = 'ALL' }) => {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState<'ALL' | 'TRAINING' | 'ASSESSMENT'>(initialFilter);
 
   useEffect(() => {
     const fetchLogs = async () => {
@@ -26,6 +28,13 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ onClose, onSelectReport }) 
     fetchLogs();
   }, []);
 
+  // Filter logs based on active tab
+  const filteredLogs = logs.filter(log => {
+      if (activeFilter === 'ALL') return true;
+      // Database stores 'TRAINING' or 'ASSESSMENT' (uppercase)
+      return log.session_type === activeFilter;
+  });
+
   // Helper to determine score color
   const getScoreColor = (score: number) => {
     if (score >= 5) return 'bg-green-100 text-green-700 border-green-200';
@@ -33,81 +42,119 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ onClose, onSelectReport }) 
     return 'bg-orange-100 text-orange-700 border-orange-200';
   };
 
+  const formatDate = (isoString: string) => {
+      const date = new Date(isoString);
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white w-full max-w-lg h-[80vh] sm:h-[600px] rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden relative">
+      <div className="bg-white w-full max-w-lg h-[85vh] sm:h-[650px] rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden relative">
         
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-white z-10">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">历史报告</h2>
-            <p className="text-xs text-gray-500">训练与评估记录 (Training & Assessment)</p>
+        <div className="pt-5 pb-2 px-6 bg-white z-10">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+                <h2 className="text-xl font-bold text-gray-900">飞行日志</h2>
+                <p className="text-xs text-gray-500">Pilot Logbook & Records</p>
+            </div>
+            <button 
+                onClick={onClose}
+                className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors"
+            >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
           </div>
-          <button 
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
+
+          {/* Filter Tabs */}
+          <div className="flex p-1 bg-gray-100 rounded-xl">
+            {(['ALL', 'TRAINING', 'ASSESSMENT'] as const).map(tab => (
+                <button
+                    key={tab}
+                    onClick={() => setActiveFilter(tab)}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                        activeFilter === tab 
+                        ? 'bg-white shadow-sm text-ios-blue' 
+                        : 'text-gray-400 hover:text-gray-600'
+                    }`}
+                >
+                    {tab === 'ALL' ? '全部记录' : tab === 'TRAINING' ? '专项训练' : '模拟评估'}
+                </button>
+            ))}
+          </div>
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/50">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/50 border-t border-gray-100">
           {loading ? (
             <div className="flex flex-col items-center justify-center h-40 space-y-2">
                <div className="w-6 h-6 border-2 border-ios-blue border-t-transparent rounded-full animate-spin"></div>
-               <span className="text-xs text-gray-400">加载记录中...</span>
+               <span className="text-xs text-gray-400">正在同步云端数据...</span>
             </div>
-          ) : logs.length === 0 ? (
-            <div className="text-center py-10 text-gray-400 text-sm">
-              暂无历史记录，快去开始训练吧！
+          ) : filteredLogs.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-center opacity-60">
+              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3 text-gray-300 text-2xl">
+                  {activeFilter === 'TRAINING' ? '🎓' : activeFilter === 'ASSESSMENT' ? '📝' : '📂'}
+              </div>
+              <p className="text-sm font-bold text-gray-500">暂无{activeFilter === 'TRAINING' ? '训练' : activeFilter === 'ASSESSMENT' ? '评估' : ''}记录</p>
+              <p className="text-xs text-gray-400 mt-1">开始一次新的会话以生成报告</p>
             </div>
           ) : (
-            logs.map((log) => (
+            filteredLogs.map((log) => (
               <button
                 key={log.id}
                 onClick={() => {
                    if (log.details) {
                        onSelectReport(log.details as AssessmentData);
                    } else {
-                       // Chinese alert for better UX
                        alert("该记录无详细报告数据 (No detailed report available).");
                    }
                 }}
-                className="w-full bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all active:scale-[0.98] text-left group"
+                className="w-full bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-ios-blue/30 transition-all active:scale-[0.99] text-left group relative overflow-hidden"
               >
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex items-center space-x-2">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold border ${getScoreColor(log.score)}`}>
-                        {log.score}
+                {/* Visual Indicator Strip */}
+                <div className={`absolute left-0 top-0 bottom-0 w-1 ${log.session_type === 'ASSESSMENT' ? 'bg-purple-500' : 'bg-ios-blue'}`}></div>
+
+                <div className="flex justify-between items-start mb-2 pl-2">
+                  <div className="flex items-center space-x-3">
+                      {/* Score Badge */}
+                      <div className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center border ${getScoreColor(log.score)}`}>
+                        <span className="text-[10px] uppercase font-bold opacity-60 leading-none mb-0.5">Lvl</span>
+                        <span className="text-sm font-black leading-none">{log.score}</span>
                       </div>
-                      <div>
-                        <h3 className="text-sm font-bold text-gray-900 line-clamp-1">{log.scenario_title || '未命名会话'}</h3>
-                        <div className="flex items-center text-[10px] text-gray-400 space-x-2">
-                            <span>{new Date(log.created_at).toLocaleDateString()}</span>
-                            <span>•</span>
-                            <span>{new Date(log.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                      
+                      <div className="min-w-0">
+                        <div className="flex items-center space-x-2 mb-0.5">
+                            {log.session_type === 'ASSESSMENT' && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200 uppercase tracking-wider">
+                                    Exam
+                                </span>
+                            )}
+                            <h3 className="text-sm font-bold text-gray-900 truncate">{log.scenario_title || '未命名会话'}</h3>
+                        </div>
+                        <div className="flex items-center text-[10px] text-gray-400 font-medium">
+                            <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                            {formatDate(log.created_at)}
                         </div>
                       </div>
                   </div>
-                  <div className="text-right flex flex-col items-end">
-                      {/* Badge for Session Type */}
-                      {log.session_type === 'ASSESSMENT' ? (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200 mb-1">
-                              评估
-                          </span>
-                      ) : (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100 mb-1">
-                              训练
-                          </span>
-                      )}
-                      
-                      <span className="text-[10px] font-mono text-gray-400 block">{log.duration}</span>
+                  
+                  <div className="text-right pl-2 shrink-0">
+                      <div className="text-xs font-mono font-bold text-gray-500 flex items-center justify-end">
+                          <svg className="w-3 h-3 mr-1 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                          {log.duration}
+                      </div>
                   </div>
                 </div>
-                <div className="flex items-center justify-between mt-1">
-                    <span className="px-2 py-0.5 bg-gray-100 rounded text-[10px] text-gray-500 uppercase font-semibold">{log.phase || 'General'}</span>
-                    <span className="text-[10px] font-bold text-ios-blue opacity-0 group-hover:opacity-100 transition-opacity">查看报告 &rarr;</span>
+                
+                <div className="flex items-center justify-between mt-3 pl-2 pt-2 border-t border-gray-50">
+                    <span className="px-2 py-0.5 bg-gray-100 rounded text-[10px] text-gray-500 uppercase font-bold tracking-wide">
+                        {log.phase || 'General'}
+                    </span>
+                    <span className="flex items-center text-[10px] font-bold text-ios-blue opacity-0 group-hover:opacity-100 transition-opacity">
+                        查看详细报告 
+                        <svg className="w-3 h-3 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    </span>
                 </div>
               </button>
             ))

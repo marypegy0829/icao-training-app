@@ -422,12 +422,14 @@ export class LiveClient {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     
     try {
-        this.inputAudioContext = new AudioContextClass();
-        this.outputAudioContext = new AudioContextClass({ sampleRate: 24000 });
-    } catch (e) {
-        console.warn("Failed to suggest sample rate, falling back to default", e);
+        // ALLOW BROWSER TO CHOOSE DEFAULT SAMPLE RATE
+        // Hardcoding sampleRate (e.g. 24000) causes failures on some hardware
         this.inputAudioContext = new AudioContextClass();
         this.outputAudioContext = new AudioContextClass();
+    } catch (e) {
+        console.warn("Failed to initialize AudioContext", e);
+        callbacks.onError(new Error("Audio hardware initialization failed."));
+        return;
     }
     
     try {
@@ -462,10 +464,20 @@ export class LiveClient {
     let targetCode = airportCode ? airportCode.toUpperCase() : "";
     let airportDetailsStr = "";
     
+    // --- UPDATED LOGIC: RANDOM AIRPORT FALLBACK ---
     if (!targetCode || targetCode === "GENERIC" || targetCode.length < 3) {
-        // Fallback to random if not specified
-        targetCode = "ZBAA"; 
-        console.log(`LiveClient: No airport specified. Defaulting to: ${targetCode}`);
+        try {
+            const randomAirport = await airportService.getRandomAirport();
+            if (randomAirport) {
+                targetCode = randomAirport.icao_code;
+                console.log(`LiveClient: Randomly selected airport: ${targetCode}`);
+            } else {
+                targetCode = "ZBAA"; // Ultimate fallback
+            }
+        } catch (e) {
+            targetCode = "ZBAA";
+            console.warn("Failed to get random airport", e);
+        }
     }
 
     // --- FETCH REAL AIRPORT DATA FROM SUPABASE ---
@@ -481,14 +493,16 @@ export class LiveClient {
             let procStr = "";
             if (airportData.procedures) {
                 if (airportData.procedures.sids && airportData.procedures.sids.length > 0) {
-                    procStr += `\n* Available SIDs (Departures): ${airportData.procedures.sids.join(', ')}`;
+                    procStr += `\n* EXPECTED SIDs (Departures): ${airportData.procedures.sids.join(', ')}`;
                 }
                 if (airportData.procedures.stars && airportData.procedures.stars.length > 0) {
-                    procStr += `\n* Available STARs (Arrivals): ${airportData.procedures.stars.join(', ')}`;
+                    procStr += `\n* EXPECTED STARs (Arrivals): ${airportData.procedures.stars.join(', ')}`;
                 }
             }
             if (airportData.taxi_routes) {
-                procStr += `\n* Common Taxi Routes: ${JSON.stringify(airportData.taxi_routes)}`;
+                // Flatten taxi routes object to string
+                const routes = Object.entries(airportData.taxi_routes).map(([k, v]) => `${k}: ${v}`).join(' | ');
+                procStr += `\n* LOCAL TAXI ROUTES: ${routes}`;
             }
 
             airportDetailsStr = `

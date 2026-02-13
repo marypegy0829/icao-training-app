@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Scenario } from '../types';
 import { airportService, Airport } from '../services/airportService';
 
@@ -14,19 +14,75 @@ const BriefingModal: React.FC<Props> = ({ scenario, onAccept, onCancel, onRefres
   const [airportCode, setAirportCode] = useState('ZBAA');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [airportData, setAirportData] = useState<Airport | null>(null);
+  
+  // Search State
+  const [searchResults, setSearchResults] = useState<Airport[]>([]);
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
-  // Auto-fetch airport details when user stops typing
+  // Initialize with a random airport
   useEffect(() => {
-      const timer = setTimeout(async () => {
-          if (airportCode.length >= 3) {
-              const data = await airportService.getAirportByCode(airportCode);
-              setAirportData(data);
-          } else {
-              setAirportData(null);
+      const initRandom = async () => {
+          try {
+              const randomApt = await airportService.getRandomAirport();
+              if (randomApt) {
+                  setAirportCode(randomApt.icao_code);
+                  setAirportData(randomApt);
+              } else {
+                  // Fallback if no data
+                  setAirportCode('ZBAA');
+              }
+          } catch (e) {
+              console.warn("Failed to init random airport", e);
           }
-      }, 500);
-      return () => clearTimeout(timer);
+      };
+      initRandom();
+  }, []);
+
+  // Auto-fetch details for exact match & Handle Search
+  useEffect(() => {
+      const delayDebounce = setTimeout(async () => {
+          // 1. Fetch search results if typing
+          if (airportCode.length >= 2) {
+             const results = await airportService.searchAirports(airportCode);
+             setSearchResults(results);
+             setShowResults(true);
+             
+             // 2. Check for exact match to populate data card (if not already populated by random init)
+             if (!airportData || airportData.icao_code !== airportCode.toUpperCase()) {
+                 const exact = results.find(a => a.icao_code === airportCode.toUpperCase());
+                 if (exact) {
+                     setAirportData(exact);
+                 } else {
+                     if (airportCode.length === 4) {
+                         const directFetch = await airportService.getAirportByCode(airportCode);
+                         setAirportData(directFetch);
+                     } else {
+                         setAirportData(null);
+                     }
+                 }
+             }
+          } else {
+             setSearchResults([]);
+             setShowResults(false);
+             // Don't clear data immediately if length < 2 to avoid flickering during deletion
+             if (airportCode.length === 0) setAirportData(null);
+          }
+      }, 300);
+
+      return () => clearTimeout(delayDebounce);
   }, [airportCode]);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+              setShowResults(false);
+          }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleStart = () => {
       const code = airportCode.trim().length >= 3 ? airportCode.trim().toUpperCase() : 'ZBAA';
@@ -42,6 +98,12 @@ const BriefingModal: React.FC<Props> = ({ scenario, onAccept, onCancel, onRefres
             setTimeout(() => setIsRefreshing(false), 300);
           }
       }
+  };
+
+  const selectAirport = (apt: Airport) => {
+      setAirportCode(apt.icao_code);
+      setAirportData(apt);
+      setShowResults(false);
   };
 
   return (
@@ -67,31 +129,58 @@ const BriefingModal: React.FC<Props> = ({ scenario, onAccept, onCancel, onRefres
                     <span className="block text-base font-mono font-bold text-ios-blue truncate">{scenario.callsign}</span>
                 </div>
                 
-                <div className="bg-white p-3 rounded-xl border-2 border-ios-blue/20 focus-within:border-ios-blue transition-colors shadow-sm relative">
-                    <span className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Location</span>
-                    <input 
-                        type="text"
-                        value={airportCode}
-                        onChange={(e) => setAirportCode(e.target.value.toUpperCase())}
-                        maxLength={4}
-                        className="block w-full text-lg font-mono font-bold text-ios-text placeholder-gray-300 focus:outline-none bg-transparent uppercase"
-                        placeholder="ICAO"
-                    />
-                    <div className="absolute top-3 right-3">
-                        {airportData ? (
-                            <span className="text-xs font-bold text-green-600 bg-green-100 px-1.5 py-0.5 rounded">FOUND</span>
-                        ) : (
-                            <svg className="w-4 h-4 text-ios-blue opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                            </svg>
-                        )}
+                <div className="relative" ref={searchRef}>
+                    <div className="bg-white p-3 rounded-xl border-2 border-ios-blue/20 focus-within:border-ios-blue transition-colors shadow-sm relative z-20">
+                        <span className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Location</span>
+                        <input 
+                            type="text"
+                            value={airportCode}
+                            onChange={(e) => {
+                                setAirportCode(e.target.value.toUpperCase());
+                                setShowResults(true);
+                            }}
+                            onFocus={() => { if(airportCode.length >= 2) setShowResults(true); }}
+                            className="block w-full text-lg font-mono font-bold text-ios-text placeholder-gray-300 focus:outline-none bg-transparent uppercase"
+                            placeholder="ICAO/City"
+                        />
+                        <div className="absolute top-3 right-3">
+                            {airportData ? (
+                                <span className="text-xs font-bold text-green-600 bg-green-100 px-1.5 py-0.5 rounded">FOUND</span>
+                            ) : (
+                                <svg className="w-4 h-4 text-ios-blue opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            )}
+                        </div>
                     </div>
+
+                    {/* Search Dropdown */}
+                    {showResults && searchResults.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-gray-100 max-h-48 overflow-y-auto z-50">
+                            {searchResults.map((apt) => (
+                                <button
+                                    key={apt.id}
+                                    onClick={() => selectAirport(apt)}
+                                    className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center justify-between border-b border-gray-50 last:border-0"
+                                >
+                                    <div>
+                                        <div className="font-bold text-sm text-gray-800">
+                                            <span className="font-mono text-ios-blue mr-2">{apt.icao_code}</span>
+                                            {apt.city}
+                                        </div>
+                                        <div className="text-[10px] text-gray-500 truncate max-w-[140px]">{apt.name}</div>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-gray-400">{apt.country}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
 
             {/* Airport Details Card */}
             {airportData && (
-                <div className="bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                <div className="bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200 p-4 shadow-sm animate-fade-in">
                     <h3 className="text-sm font-bold text-gray-900 mb-2 flex items-center">
                         <span className="mr-2">{airportData.name}</span>
                         <span className="text-[10px] font-normal text-gray-500 bg-white border px-1.5 rounded">{airportData.elevation_ft}ft</span>

@@ -337,6 +337,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                  setAssessment(data);
                  setShowHistory(false);
              }}
+             initialFilter="ASSESSMENT"
           />
       )}
 
@@ -354,8 +355,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
       <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-sky-200/40 rounded-full blur-[100px] animate-blob mix-blend-multiply pointer-events-none"></div>
       <div className="absolute top-[10%] right-[-10%] w-[500px] h-[500px] bg-orange-100/60 rounded-full blur-[100px] animate-blob animation-delay-2000 mix-blend-multiply pointer-events-none"></div>
       
-      {/* Header */}
-      <header className="z-20 pt-12 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
+      {/* Header - UPDATED PADDING pt-2 */}
+      <header className="z-20 pt-2 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
         <div>
            <div className="flex items-center space-x-2 mb-1">
              <div className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-ios-orange animate-pulse' : 'bg-gray-400'}`}></div>
@@ -376,7 +377,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     className="flex items-center space-x-1.5 bg-gradient-to-r from-ios-blue to-ios-indigo text-white px-3 py-1.5 rounded-full shadow-md hover:shadow-lg hover:scale-105 transition-all active:scale-95"
                   >
                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                      </svg>
                      <span className="text-xs font-bold">历史报告</span>
                   </button>
@@ -397,7 +398,11 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         {/* Upper: Visualizer & Cockpit */}
         <div className="shrink-0 pt-2 pb-4 px-6 flex flex-col items-center space-y-4">
            <Visualizer isActive={status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING} audioLevel={audioLevel} />
-           <CockpitDisplay active={status === ConnectionStatus.CONNECTED} scenario={scenario} />
+           <CockpitDisplay 
+                active={status === ConnectionStatus.CONNECTED} 
+                scenario={scenario} 
+                airportCode={activeAirport} // Pass active airport
+           />
         </div>
 
         {/* Lower: Transcript */}
@@ -413,18 +418,18 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 )}
             </div>
             
-            {/* NEW: Pinned Situation Box */}
+            {/* NEW: Pinned Situation Box (Pinned to top of transcript area) - Font size increased */}
             {scenario && (
-              <div className="px-6 py-3 bg-yellow-50/80 backdrop-blur-sm border-b border-yellow-100/50 z-10 shrink-0 shadow-sm transition-all animate-fade-in">
-                  <div className="flex items-start space-x-2">
-                      <div className="mt-0.5 shrink-0 bg-yellow-100 text-yellow-600 rounded-md p-1">
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="px-6 py-4 bg-yellow-50/80 backdrop-blur-sm border-b border-yellow-100/50 z-10 shrink-0 shadow-sm transition-all animate-fade-in">
+                  <div className="flex items-start space-x-3">
+                      <div className="mt-1 shrink-0 bg-yellow-100 text-yellow-600 rounded-lg p-1.5">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
                       </div>
                       <div className="min-w-0 flex-1">
-                          <span className="text-[10px] font-bold text-yellow-600 uppercase tracking-wider block mb-0.5">SITUATION</span>
-                          <p className="text-xs text-yellow-900/90 leading-relaxed font-medium line-clamp-3">
+                          <span className="text-[10px] sm:text-xs font-bold text-yellow-700 uppercase tracking-wider block mb-1">Current Situation</span>
+                          <p className="text-sm sm:text-base text-yellow-900 leading-relaxed font-medium line-clamp-4">
                               {scenario.details}
                           </p>
                       </div>
@@ -492,6 +497,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     onMouseLeave={handlePttUp}
                     onTouchStart={handlePttDown}
                     onTouchEnd={handlePttUp}
+                    onTouchCancel={handlePttUp}
                     onContextMenu={(e) => e.preventDefault()}
                     className={`flex-1 h-12 rounded-full font-bold text-lg shadow-lg transition-all duration-100 flex items-center justify-center border select-none touch-none
                     ${isTransmitting 

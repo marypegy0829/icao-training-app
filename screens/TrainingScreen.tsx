@@ -2,7 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { LiveClient } from '../services/liveClient';
 import { SCENARIO_CATEGORIES, ScenarioCategory } from '../services/trainingData';
-import { scenarioService } from '../services/scenarioService'; // Use this service
+import { scenarioService } from '../services/scenarioService';
+import { airportService, Airport } from '../services/airportService';
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, FlightPhase, DifficultyLevel } from '../types';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
@@ -27,7 +28,7 @@ interface TrainingScreenProps {
     onConsumeScenario?: () => void;
     difficulty: DifficultyLevel;
     accentEnabled: boolean;
-    cockpitNoise: boolean; // New Prop
+    cockpitNoise: boolean; 
 }
 
 const TrainingScreen: React.FC<TrainingScreenProps> = ({ 
@@ -43,7 +44,12 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   // Selection State
   const [selectedPhase, setSelectedPhase] = useState<FlightPhase | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ScenarioCategory | null>(null);
-  const [airportCode, setAirportCode] = useState<string>(''); // NEW: Airport Code State
+  const [airportCode, setAirportCode] = useState<string>('');
+  
+  // Airport Search State
+  const [searchResults, setSearchResults] = useState<Airport[]>([]);
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   // Data State
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -67,7 +73,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   const [audioLevel, setAudioLevel] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [assessment, setAssessment] = useState<AssessmentData | null>(null);
-  const [showHistory, setShowHistory] = useState(false); // State for History Modal
+  const [showHistory, setShowHistory] = useState(false); 
   const startTimeRef = useRef<number>(0);
   
   // PTT State
@@ -112,6 +118,32 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     return () => {
       liveClientRef.current?.disconnect();
     };
+  }, []);
+
+  // Handle Airport Search
+  useEffect(() => {
+      const delayDebounce = setTimeout(async () => {
+          if (airportCode.length >= 2) {
+             const results = await airportService.searchAirports(airportCode);
+             setSearchResults(results);
+             setShowResults(true);
+          } else {
+             setSearchResults([]);
+             setShowResults(false);
+          }
+      }, 300);
+      return () => clearTimeout(delayDebounce);
+  }, [airportCode]);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+      const handleClickOutside = (event: MouseEvent) => {
+          if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+              setShowResults(false);
+          }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Handle Initial Scenario Auto-Start
@@ -235,14 +267,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           startTimeRef.current = Date.now(); // Reset start time on actual connection
       },
       onClose: () => {
-         // CRITICAL FIX: Same logic as AssessmentScreen.
-         // If we are ANALYZING, do NOT go back to dashboard. Wait for assessment data.
-         // Use statusRef to reliably check status without TS overlap errors in setState callback
          if (statusRef.current === ConnectionStatus.ANALYZING) {
              return;
          }
-         
-         // If manual close or error, go back to dashboard unless it was an error
          if (statusRef.current !== ConnectionStatus.ERROR) {
              setView('dashboard');
              setStatus(ConnectionStatus.DISCONNECTED);
@@ -283,15 +310,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           });
       },
       onAssessment: (data) => {
-          // 1. Save data
           setAssessment(data);
           saveToSupabase(data);
-          
-          // 2. Stop spinner (set to DISCONNECTED), but DO NOT setView('dashboard') yet.
-          // The AssessmentReport modal will overlay the current session view.
           setStatus(ConnectionStatus.DISCONNECTED);
-          
-          // 3. Clean up socket
           liveClientRef.current?.disconnect();
       }
     }, difficulty, airportCode, accentEnabled, cockpitNoise, coachingInstruction);
@@ -302,8 +323,6 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           setStatus(ConnectionStatus.ANALYZING);
           await liveClientRef.current.finalize();
       } else {
-          // If unconnected or error, just go back. Record partial if needed? 
-          // For now, only record if we were connected.
           if (status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING) {
               saveToSupabase(null);
           }
@@ -352,18 +371,29 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           return matchCategory && matchPhase;
       });
 
+      // Helper to color code difficulty
+      const getDifficultyColor = (level?: string) => {
+          switch(level) {
+              case 'Easy': return 'bg-green-100 text-green-700';
+              case 'Medium': return 'bg-blue-100 text-blue-700';
+              case 'Hard': return 'bg-orange-100 text-orange-700';
+              case 'Extreme': return 'bg-red-100 text-red-700';
+              default: return 'bg-gray-100 text-gray-600';
+          }
+      };
+
       return (
           <div className="h-full overflow-y-auto bg-ios-bg pb-20 relative">
               
-              {/* Header */}
-              <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex flex-col space-y-4">
+              {/* Header - UPDATED PADDING pt-4 */}
+              <div className="pt-4 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex flex-col space-y-4">
                   <div className="flex justify-between items-center">
                       <div>
                           <h1 className="text-2xl font-bold text-ios-text">专项训练</h1>
                           <div className="flex items-center space-x-2 mt-1">
                               <p className="text-sm text-ios-subtext">针对性强化飞行特情通话能力</p>
                               <div className="text-[10px] font-bold text-ios-blue bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase">
-                                Diff: {difficulty}
+                                Mode: {difficulty}
                               </div>
                           </div>
                       </div>
@@ -372,7 +402,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                         className="flex items-center space-x-1.5 bg-gradient-to-r from-ios-blue to-ios-indigo text-white px-4 py-2 rounded-full shadow-lg hover:shadow-xl hover:scale-105 transition-all active:scale-95"
                       >
                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                          </svg>
                          <span className="text-sm font-bold">历史</span>
                       </button>
@@ -390,7 +420,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                           <h3 className="text-xl font-bold mb-1">Complex Taxi Instructions</h3>
                           <p className="text-sm opacity-90 mb-4">针对条件性滑行指令的专项听力训练。</p>
                           <button 
-                             onClick={() => startTraining(scenarios.find(s => s.id === 'taxi_giveway') || scenarios[0])}
+                             onClick={() => startTraining(scenarios.find(s => s.id === 'taxi_giveway' || s.id === 'gnd_02') || scenarios[0])}
                              className="px-4 py-2 bg-white text-ios-indigo text-sm font-bold rounded-full shadow-sm hover:scale-105 transition-transform"
                           >
                               开始练习
@@ -403,8 +433,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
               {/* Filters */}
               <div className="px-6 mb-4">
                   {/* Airport Selection Input */}
-                  <div className="relative mb-6">
-                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <div className="relative mb-6" ref={searchRef}>
+                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
                         <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -412,16 +442,44 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                      </div>
                      <input 
                         type="text" 
-                        maxLength={4}
                         placeholder="机场代码 (例如 ZBAA)" 
-                        className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 focus:bg-white focus:border-ios-blue focus:ring-0 rounded-xl text-sm font-mono font-bold uppercase transition-colors shadow-sm"
+                        className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 focus:bg-white focus:border-ios-blue focus:ring-0 rounded-xl text-sm font-mono font-bold uppercase transition-colors shadow-sm relative z-0"
                         value={airportCode}
-                        onChange={(e) => setAirportCode(e.target.value.toUpperCase())}
+                        onChange={(e) => {
+                            setAirportCode(e.target.value.toUpperCase());
+                            setShowResults(true);
+                        }}
+                        onFocus={() => { if(airportCode.length >= 2) setShowResults(true); }}
                      />
                      {airportCode.length === 4 && (
                          <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
                              <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded">LOCALIZED</span>
                          </div>
+                     )}
+
+                     {/* Search Dropdown */}
+                     {showResults && searchResults.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-gray-100 max-h-48 overflow-y-auto z-50">
+                            {searchResults.map((apt) => (
+                                <button
+                                    key={apt.id}
+                                    onClick={() => {
+                                        setAirportCode(apt.icao_code);
+                                        setShowResults(false);
+                                    }}
+                                    className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center justify-between border-b border-gray-50 last:border-0"
+                                >
+                                    <div>
+                                        <div className="font-bold text-sm text-gray-800">
+                                            <span className="font-mono text-ios-blue mr-2">{apt.icao_code}</span>
+                                            {apt.city}
+                                        </div>
+                                        <div className="text-[10px] text-gray-500 truncate max-w-[140px]">{apt.name}</div>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-gray-400">{apt.country}</span>
+                                </button>
+                            ))}
+                        </div>
                      )}
                   </div>
 
@@ -475,16 +533,23 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                             className="w-full text-left bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all active:scale-[0.99]"
                           >
                               <div className="flex justify-between items-start mb-1">
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase
-                                      ${scenario.category === 'Operational & Weather' ? 'bg-green-100 text-green-700' : 'bg-ios-blue/5 text-ios-blue'}
-                                  `}>
-                                      {scenario.category === 'Operational & Weather' ? 'OPS & WX' : scenario.category}
-                                  </span>
+                                  <div className="flex items-center space-x-2">
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase
+                                          ${scenario.category === 'Operational & Weather' ? 'bg-green-100 text-green-700' : 'bg-ios-blue/5 text-ios-blue'}
+                                      `}>
+                                          {scenario.category === 'Operational & Weather' ? 'OPS & WX' : scenario.category}
+                                      </span>
+                                      {scenario.difficulty_level && (
+                                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${getDifficultyColor(scenario.difficulty_level)}`}>
+                                              {scenario.difficulty_level}
+                                          </span>
+                                      )}
+                                  </div>
                                   <span className="text-[10px] font-mono text-gray-400">{scenario.phase}</span>
                               </div>
                               <h4 className="font-bold text-ios-text mb-1">{scenario.title}</h4>
                               <p className="text-xs text-ios-subtext line-clamp-2">{scenario.details}</p>
-                              {airportCode && airportCode.length === 4 && (
+                              {airportCode && airportCode.length >= 3 && (
                                   <div className="mt-2 text-[10px] text-gray-400 flex items-center">
                                       <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>
                                       Training at {airportCode}
@@ -515,14 +580,13 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
         <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-sky-200/40 rounded-full blur-[100px] animate-blob mix-blend-multiply pointer-events-none"></div>
         <div className="absolute top-[10%] right-[-10%] w-[500px] h-[500px] bg-orange-100/60 rounded-full blur-[100px] animate-blob animation-delay-2000 mix-blend-multiply pointer-events-none"></div>
         
-        {/* Header */}
-        <header className="z-20 pt-12 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
+        {/* Header - UPDATED PADDING pt-2 */}
+        <header className="z-20 pt-2 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
           <div>
              <div className="flex items-center space-x-2 mb-1">
                <button 
                  onClick={() => {
                      liveClientRef.current?.disconnect();
-                     // Here we can safely go to dashboard because it's a user manual abort
                      setView('dashboard');
                  }} 
                  className="flex items-center text-ios-blue hover:text-ios-blue/80 transition-colors"
@@ -557,7 +621,11 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           {/* Upper: Visualizer & Cockpit */}
           <div className="shrink-0 pt-2 pb-4 px-6 flex flex-col items-center space-y-4">
              <Visualizer isActive={status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING} audioLevel={audioLevel} />
-             <CockpitDisplay active={status === ConnectionStatus.CONNECTED} scenario={activeScenario} />
+             <CockpitDisplay 
+                active={status === ConnectionStatus.CONNECTED} 
+                scenario={activeScenario} 
+                airportCode={airportCode} // Pass airport code
+             />
           </div>
 
           {/* Lower: Transcript */}
@@ -566,6 +634,25 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                   <span className="text-xs font-semibold text-ios-subtext">Live Transcript</span>
                   {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">Connecting...</span>}
               </div>
+              
+              {/* NEW: Pinned Situation Box (Matched to AssessmentScreen) */}
+              {activeScenario && (
+                <div className="px-6 py-4 bg-yellow-50/80 backdrop-blur-sm border-b border-yellow-100/50 z-10 shrink-0 shadow-sm transition-all animate-fade-in">
+                    <div className="flex items-start space-x-3">
+                        <div className="mt-1 shrink-0 bg-yellow-100 text-yellow-600 rounded-lg p-1.5">
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <span className="text-[10px] sm:text-xs font-bold text-yellow-700 uppercase tracking-wider block mb-1">Current Situation</span>
+                            <p className="text-sm sm:text-base text-yellow-900 leading-relaxed font-medium line-clamp-4">
+                                {activeScenario.details}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+              )}
               
               {/* Error Overlay */}
               {status === ConnectionStatus.ERROR && errorMsg && (
@@ -617,6 +704,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                     onMouseLeave={handlePttUp}
                     onTouchStart={handlePttDown}
                     onTouchEnd={handlePttUp}
+                    onTouchCancel={handlePttUp}
                     onContextMenu={(e) => e.preventDefault()}
                     disabled={status !== ConnectionStatus.CONNECTED}
                     className={`flex-1 h-12 rounded-full font-bold text-lg shadow-lg transition-all duration-100 flex items-center justify-center border select-none touch-none
@@ -674,6 +762,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                 setAssessment(data);
                 setShowHistory(false);
             }}
+            initialFilter="TRAINING"
           />
       )}
     </>

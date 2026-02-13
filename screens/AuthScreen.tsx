@@ -5,7 +5,11 @@ import { userService } from '../services/userService';
 
 type AuthMode = 'login' | 'register-step-1' | 'register-step-2' | 'forgot-password';
 
-const AuthScreen: React.FC = () => {
+interface AuthScreenProps {
+    // Optional: Allow parent to control initial mode if needed later
+}
+
+const AuthScreen: React.FC<AuthScreenProps> = () => {
   const [mode, setMode] = useState<AuthMode>('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -14,6 +18,7 @@ const AuthScreen: React.FC = () => {
   // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   
   // Profile Form State
   const [profileData, setProfileData] = useState({
@@ -41,7 +46,13 @@ const AuthScreen: React.FC = () => {
   const handleRegisterStep1 = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate Password
+    // Validate Passwords Match
+    if (password !== confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+    }
+
+    // Validate Password Policy
     const validation = authService.validatePassword(password);
     if (!validation.isValid) {
       setError(validation.message || 'Invalid password');
@@ -55,35 +66,17 @@ const AuthScreen: React.FC = () => {
       
       // CRITICAL: Check if we have a session. If not, email confirmation is enabled.
       if (session) {
-          setMode('register-step-2');
+          // If auto-sign-in works, App.tsx will pick up the session.
+          // However, we need to ensure the user knows they need to fill profile.
+          // Since App.tsx handles the "No Profile" state logic now, we can just let it redirect.
+          // But to be smooth, we can try to stay here if possible, but App.tsx unmounts us.
+          // We rely on App.tsx to show the "CompleteProfile" screen if session exists but profile doesn't.
       } else {
           setSuccessMsg("Registration successful! Please check your email to verify your account before logging in.");
           setMode('login');
       }
     } catch (err: any) {
       setError(err.message || 'Registration failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRegisterStep2 = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      await userService.createProfile({
-        name: profileData.name,
-        airline: profileData.airline,
-        aircraft_type: profileData.aircraft_type,
-        flight_level: profileData.flight_level,
-        current_icao_level: parseInt(profileData.current_icao_level)
-      });
-      // App.tsx auth state listener will handle transition to Home
-      window.location.reload(); 
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Failed to save profile. Ensure you are logged in.');
     } finally {
       setLoading(false);
     }
@@ -195,6 +188,22 @@ const AuthScreen: React.FC = () => {
           <li className={/[0-9]/.test(password) ? 'text-green-600' : ''}>One number</li>
         </ul>
       </div>
+      
+      {/* Confirm Password Field */}
+      <div>
+        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Confirm Password</label>
+        <input 
+          type="password" 
+          required
+          className={`w-full p-3 bg-gray-50 border rounded-xl transition-all ${password && confirmPassword && password !== confirmPassword ? 'border-red-300 focus:border-red-500' : 'border-gray-200 focus:border-ios-blue'}`}
+          value={confirmPassword}
+          onChange={e => setConfirmPassword(e.target.value)}
+        />
+        {password && confirmPassword && password !== confirmPassword && (
+            <p className="text-[10px] text-red-500 mt-1">Passwords do not match.</p>
+        )}
+      </div>
+
       <button 
         type="submit" 
         disabled={loading}
@@ -207,88 +216,6 @@ const AuthScreen: React.FC = () => {
           Already have an account? <span className="text-ios-blue font-bold">Sign In</span>
         </button>
       </div>
-    </form>
-  );
-
-  const renderRegisterStep2 = () => (
-    <form onSubmit={handleRegisterStep2} className="space-y-4 animate-fade-in">
-       <div className="mb-2">
-         <h2 className="text-lg font-bold text-ios-text">Pilot Profile</h2>
-         <p className="text-xs text-gray-400">Step 2/2: Operational Details</p>
-       </div>
-       
-       <div>
-         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Full Name</label>
-         <input 
-           type="text" 
-           required
-           className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl"
-           value={profileData.name}
-           onChange={e => setProfileData({...profileData, name: e.target.value})}
-           placeholder="e.g. Captain Tom"
-         />
-       </div>
-
-       <div className="grid grid-cols-2 gap-3">
-         <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Airline</label>
-            <input 
-              type="text" 
-              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl"
-              value={profileData.airline}
-              onChange={e => setProfileData({...profileData, airline: e.target.value})}
-              placeholder="ICAO Code"
-            />
-         </div>
-         <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Aircraft</label>
-            <input 
-              type="text" 
-              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl"
-              value={profileData.aircraft_type}
-              onChange={e => setProfileData({...profileData, aircraft_type: e.target.value})}
-              placeholder="e.g. B737"
-            />
-         </div>
-       </div>
-
-       <div className="grid grid-cols-2 gap-3">
-         <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Rank</label>
-            <select 
-              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm"
-              value={profileData.flight_level}
-              onChange={e => setProfileData({...profileData, flight_level: e.target.value})}
-            >
-              <option>Cadet</option>
-              <option>Second Officer</option>
-              <option>First Officer</option>
-              <option>Senior FO</option>
-              <option>Captain</option>
-            </select>
-         </div>
-         <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Current Level</label>
-            <select 
-              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm"
-              value={profileData.current_icao_level}
-              onChange={e => setProfileData({...profileData, current_icao_level: e.target.value})}
-            >
-              <option value="3">Level 3</option>
-              <option value="4">Level 4</option>
-              <option value="5">Level 5</option>
-              <option value="6">Level 6</option>
-            </select>
-         </div>
-       </div>
-
-      <button 
-        type="submit" 
-        disabled={loading}
-        className="w-full py-3 bg-ios-blue text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
-      >
-        {loading ? 'Completing Setup...' : 'Complete Registration'}
-      </button>
     </form>
   );
 
@@ -346,7 +273,7 @@ const AuthScreen: React.FC = () => {
 
             {mode === 'login' && renderLogin()}
             {mode === 'register-step-1' && renderRegisterStep1()}
-            {mode === 'register-step-2' && renderRegisterStep2()}
+            {/* Step 2 is now handled by App.tsx via CompleteProfileScreen, but we keep the mode type for future extensibility */}
             {mode === 'forgot-password' && renderForgotPassword()}
         </div>
     </div>

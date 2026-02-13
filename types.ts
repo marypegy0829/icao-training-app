@@ -39,6 +39,7 @@ export interface Scenario {
   callsign: string;
   category?: string;
   phase?: FlightPhase;
+  difficulty_level?: 'Easy' | 'Medium' | 'Hard' | 'Extreme'; // New field from DB
 }
 
 export type Tab = 'home' | 'training' | 'assessment' | 'profile';
