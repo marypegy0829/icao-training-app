@@ -128,8 +128,8 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
   return (
     <div className="h-full w-full bg-ios-bg overflow-y-auto pb-24 font-sans text-ios-text">
       
-      {/* 1. Header Profile Card - UPDATED PADDING pt-4 (was pt-12) */}
-      <div className="relative bg-white pb-8 pt-4 px-6 rounded-b-[2.5rem] shadow-soft mb-6 overflow-hidden">
+      {/* 1. Header Profile Card */}
+      <div className="relative bg-white pb-8 pt-12 px-6 rounded-b-[2.5rem] shadow-soft mb-6 overflow-hidden">
         {/* Background Decor */}
         <div className="absolute top-[-50px] right-[-50px] w-64 h-64 bg-ios-blue/5 rounded-full blur-3xl pointer-events-none"></div>
         
@@ -226,7 +226,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-400 to-indigo-500 shadow-lg shadow-blue-200 p-3 flex flex-col justify-between text-left transition-transform active:scale-95 group"
               >
                   <div className="absolute top-0 right-0 p-2 opacity-20 text-white transform group-hover:scale-110 transition-transform">
-                      <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                      <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                   </div>
                   <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white">
                       <span className="text-lg">✈️</span>

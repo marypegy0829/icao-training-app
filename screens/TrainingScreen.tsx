@@ -385,8 +385,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
       return (
           <div className="h-full overflow-y-auto bg-ios-bg pb-20 relative">
               
-              {/* Header - UPDATED PADDING pt-4 */}
-              <div className="pt-4 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex flex-col space-y-4">
+              {/* Header */}
+              <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex flex-col space-y-4">
                   <div className="flex justify-between items-center">
                       <div>
                           <h1 className="text-2xl font-bold text-ios-text">专项训练</h1>
@@ -580,8 +580,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
         <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-sky-200/40 rounded-full blur-[100px] animate-blob mix-blend-multiply pointer-events-none"></div>
         <div className="absolute top-[10%] right-[-10%] w-[500px] h-[500px] bg-orange-100/60 rounded-full blur-[100px] animate-blob animation-delay-2000 mix-blend-multiply pointer-events-none"></div>
         
-        {/* Header - UPDATED PADDING pt-2 */}
-        <header className="z-20 pt-2 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
+        {/* Header */}
+        <header className="z-20 pt-12 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
           <div>
              <div className="flex items-center space-x-2 mb-1">
                <button 

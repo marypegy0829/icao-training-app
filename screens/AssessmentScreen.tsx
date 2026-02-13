@@ -355,8 +355,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
       <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-sky-200/40 rounded-full blur-[100px] animate-blob mix-blend-multiply pointer-events-none"></div>
       <div className="absolute top-[10%] right-[-10%] w-[500px] h-[500px] bg-orange-100/60 rounded-full blur-[100px] animate-blob animation-delay-2000 mix-blend-multiply pointer-events-none"></div>
       
-      {/* Header - UPDATED PADDING pt-2 */}
-      <header className="z-20 pt-2 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
+      {/* Header */}
+      <header className="z-20 pt-12 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
         <div>
            <div className="flex items-center space-x-2 mb-1">
              <div className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-ios-orange animate-pulse' : 'bg-gray-400'}`}></div>

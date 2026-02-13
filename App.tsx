@@ -8,7 +8,6 @@ import TrainingScreen from './screens/TrainingScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AuthScreen from './screens/AuthScreen';
 import CompleteProfileScreen from './screens/CompleteProfileScreen';
-import { GlobalHeader } from './components/GlobalHeader'; // Import Header
 import { Tab, Scenario, DifficultyLevel } from './types';
 
 const App: React.FC = () => {
@@ -169,16 +168,13 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-full flex flex-col bg-ios-bg font-sans text-ios-text selection:bg-ios-blue/20">
       
-      {/* Global Header */}
-      <GlobalHeader />
-
-      {/* Content Area with Top Padding for Header */}
-      <div className="flex-1 overflow-hidden relative pt-[48px]">
+      {/* Content Area */}
+      <div className="flex-1 overflow-hidden relative">
         {renderScreen()}
       </div>
 
       {/* Bottom Tab Bar */}
-      <div className="h-16 bg-white/90 backdrop-blur-md border-t border-gray-200 shrink-0 flex items-center justify-around pb-safe z-50">
+      <div className="h-16 bg-white/90 backdrop-blur-md border-t border-gray-200 shrink-0 flex items-center justify-around pb-safe">
         
         {/* Home Tab */}
         <button 

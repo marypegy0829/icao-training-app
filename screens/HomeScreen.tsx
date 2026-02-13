@@ -255,8 +255,8 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
   return (
     <div className="h-full w-full bg-ios-bg overflow-y-auto pb-24 relative">
       
-      {/* 1. Header Section - UPDATED PADDING for Global Header */}
-      <div className="pt-4 px-6 pb-4 bg-white rounded-b-[2.5rem] shadow-soft mb-6 relative overflow-hidden">
+      {/* 1. Header Section */}
+      <div className="pt-12 px-6 pb-4 bg-white rounded-b-[2.5rem] shadow-soft mb-6 relative overflow-hidden">
          <div className="absolute top-0 right-0 w-40 h-40 bg-ios-blue/5 rounded-full blur-3xl -translate-y-10 translate-x-10 pointer-events-none"></div>
 
          <div className="relative z-10">
