@@ -21,6 +21,24 @@ function parseScore(val: any): number {
     return Math.max(1, Math.min(6, Math.round(num)));
 }
 
+// Helper: Clean JSON output from LLM (remove markdown, extra text)
+function cleanJsonOutput(text: string): string {
+  let cleaned = text.trim();
+  // Remove markdown code blocks
+  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '');
+  cleaned = cleaned.replace(/\s*```$/, '');
+  
+  // Find the first '{' and last '}' to handle potential preamble/postscript
+  const firstOpen = cleaned.indexOf('{');
+  const lastClose = cleaned.lastIndexOf('}');
+  
+  if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+    cleaned = cleaned.substring(firstOpen, lastClose + 1);
+  }
+  
+  return cleaned;
+}
+
 // Helper to safely parse and default the assessment data to avoid runtime crashes
 function safeParseAssessment(data: any): AssessmentData {
     // Robustly parse scores even if they come as strings
@@ -852,9 +870,23 @@ export class LiveClient {
 
             const jsonText = response.text;
             if (jsonText) {
-                const parsed = JSON.parse(jsonText);
-                const safeData = safeParseAssessment(parsed);
-                this.currentCallbacks.onAssessment(safeData);
+                try {
+                    const cleanedJson = cleanJsonOutput(jsonText);
+                    const parsed = JSON.parse(cleanedJson);
+                    const safeData = safeParseAssessment(parsed);
+                    this.currentCallbacks.onAssessment(safeData);
+                } catch (parseError) {
+                    console.error("JSON Parse Error:", parseError, "Raw Text:", jsonText);
+                    // Fallback to a partial report or error state
+                     this.currentCallbacks.onAssessment(safeParseAssessment({
+                        executiveSummary: { 
+                            assessment: "AI 评估报告生成格式错误，无法解析。请重试。(JSON Parse Failed)", 
+                            safetyMargin: "Unknown", 
+                            frictionPoints: "System Error" 
+                        },
+                        feedback: jsonText // Return raw text so user might see something
+                    }));
+                }
             } else {
                 throw new Error("Empty response from assessment model.");
             }

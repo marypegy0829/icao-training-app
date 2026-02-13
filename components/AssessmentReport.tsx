@@ -76,13 +76,35 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-0 sm:p-4 overflow-y-auto animate-fade-in print:p-0 print:bg-white print:static">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-0 sm:p-4 overflow-y-auto animate-fade-in print:p-0 print:bg-white print:static print:overflow-visible print:block">
       <style>{`
         @media print {
+          /* Hide everything outside the report */
+          body > *:not(#root) { display: none; }
+          #root > *:not(.fixed) { display: none; } /* Try to hide app background if possible */
+          
           .no-print { display: none !important; }
-          .print-full { width: 100% !important; height: auto !important; max-width: none !important; max-height: none !important; overflow: visible !important; boxShadow: none !important; }
-          body { background: white; color: black; }
-          /* Ensure backgrounds print */
+          
+          /* Reset the modal container for printing */
+          .print-full { 
+            position: static !important; 
+            width: 100% !important; 
+            height: auto !important; 
+            max-width: none !important; 
+            max-height: none !important; 
+            overflow: visible !important; 
+            box-shadow: none !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+          }
+          
+          /* Ensure the wrapper allows scrolling/flow */
+          .overflow-y-auto { overflow: visible !important; height: auto !important; }
+          .fixed { position: static !important; }
+          
+          body { background: white; color: black; height: auto; overflow: visible; }
+          html { height: auto; overflow: visible; }
+          
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           .page-break { page-break-before: always; }
         }
