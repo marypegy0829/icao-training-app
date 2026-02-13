@@ -533,6 +533,15 @@ export class LiveClient {
     - **DIVERSION**: If pilot requests diversion, suggest realistic nearby airports for ${targetCode}.
     `;
 
+    // Extract dynamic environment settings to be reusable
+    const environmentContext = `
+    ${airportInstruction}
+
+    ${difficultyPrompt}
+    
+    ${accentPrompt}
+    `;
+
     const baseInstruction = `
     # ROLE: Senior ICAO English Examiner (Level 4-6) & Senior Air Traffic Controller (20+ years experience)
     # OBJECTIVE: Conduct a high-fidelity radiotelephony simulation and examination.
@@ -547,11 +556,7 @@ export class LiveClient {
     - Details: ${scenario.details}
     - Callsign: "${scenario.callsign}"
 
-    ${airportInstruction}
-
-    ${difficultyPrompt}
-    
-    ${accentPrompt}
+    ${environmentContext}
 
     # INTERACTION GUIDELINES (DYNAMIC TRAINING):
     1. **Complexity Scaling**:
@@ -573,7 +578,12 @@ export class LiveClient {
     - If the user fails to understand twice, use "Plain English" to clarify, but mark it as a vocabulary/comprehension issue.
     `;
 
-    const finalInstruction = customSystemInstruction || baseInstruction;
+    // UPDATED LOGIC: Even if a custom instruction is provided (e.g. Training Mode),
+    // we MUST prepend the dynamic environment context (Airport/Accent/Difficulty)
+    // to ensure the accent works correctly.
+    const finalInstruction = customSystemInstruction 
+        ? `${environmentContext}\n\n${customSystemInstruction}` 
+        : baseInstruction;
 
     try {
         console.log("Initializing Gemini Live Session...");
