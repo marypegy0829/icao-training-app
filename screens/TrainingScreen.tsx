@@ -4,6 +4,7 @@ import { LiveClient } from '../services/liveClient';
 import { SCENARIO_CATEGORIES, ScenarioCategory } from '../services/trainingData';
 import { scenarioService } from '../services/scenarioService';
 import { airportService, Airport } from '../services/airportService';
+import { ruleService } from '../services/ruleService';
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, FlightPhase, DifficultyLevel } from '../types';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
@@ -254,6 +255,13 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     liveClientRef.current = new LiveClient(API_KEY);
     liveClientRef.current.setInputMuted(isPttEnabled);
 
+    // FETCH DYNAMIC RULES FROM SUPABASE
+    let dynamicRules = "";
+    if (scenario.phase) {
+        console.log(`Fetching rules for phase: ${scenario.phase}`);
+        dynamicRules = await ruleService.getLogicRulesForPhase(scenario.phase);
+    }
+
     // COACHING INSTRUCTION WITH EXPLICIT REPORT TRIGGER
     const coachingInstruction = `
     # SYSTEM INSTRUCTION: FLIGHT INSTRUCTOR (COACHING MODE)
@@ -278,7 +286,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
        - Provide a "Quick Assessment" in the report. Be concise but cover all 6 points.
     `;
 
-    // Pass difficulty, airport, accent, AND NOISE SETTING
+    // Pass difficulty, airport, accent, NOISE, and RULES
     await liveClientRef.current.connect(scenario, {
       onOpen: () => {
           setStatus(ConnectionStatus.CONNECTED);
@@ -334,7 +342,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           setStatus(ConnectionStatus.DISCONNECTED);
           liveClientRef.current?.disconnect();
       }
-    }, difficulty, airportCode, accentEnabled, cockpitNoise, coachingInstruction);
+    }, difficulty, airportCode, accentEnabled, cockpitNoise, coachingInstruction, dynamicRules);
   };
 
   const handleStop = async () => {

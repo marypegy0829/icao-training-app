@@ -141,42 +141,22 @@ const tools: Tool[] = [{ functionDeclarations: [assessmentToolDefinition] }];
 
 // --- ICAO DOC 9835 PRONUNCIATION STANDARDS (ENHANCED) ---
 const ICAO_PRONUNCIATION_GUIDE = `
-### **ICAO DOC 9835 STRICT PRONUNCIATION RULES (MANDATORY)**
-You MUST follow these pronunciation rules exactly. Do not use standard conversational English pronunciation for the items below.
+### **RULE 1: PHONETIC AND VOCABULARY OVERRIDE (CRITICAL)**
+You MUST force your recognition and speech generation to adhere to these standards.
 
-**1. PHONETIC NUMBERS (ABSOLUTE RULE)**
-When speaking headings, flight levels, runways, or frequencies, you MUST use these phonetics:
-*   **0**: ZE-RO (Stress 1st syllable)
-*   **1**: WUN (Sharp)
-*   **2**: TOO (Sharp T)
-*   **3**: **TREE** (Like a tree. NEVER 'Three' with 'th')
-*   **4**: **FOW-er** (Two syllables. NEVER 'For')
-*   **5**: **FIFE** (Hard 'F' at end. NEVER 'Five' with 'v')
-*   **6**: SIX
-*   **7**: SEV-en
-*   **8**: AIT
-*   **9**: **NIN-er** (Two syllables. Ends with 'er'. NEVER 'Nine')
-*   **1000**: **TOU-SAND** (No 'th' sound. Start with 'T'.)
-*   **.**: **DAY-SEE-MAL** (NEVER 'Point' unless in USA region.)
+**1. MANDATORY PHONETICS**
+*   **3**: **TREE** (Never "Three")
+*   **5**: **FIFE** (Never "Five")
+*   **9**: **NIN-er** (Never "Nine")
+*   **1000**: **TOU-SAND** (Never "Thousand")
+*   **.**: **DAY-SEE-MAL** (Never "Point")
 
-**2. ABBREVIATION EXPANSION (SPEAK FULL WORDS)**
-You must expand standard abbreviations in speech.
-*   **"FL"** -> Speak as **"FLIGHT LEVEL"** (e.g., "FL300" -> "Flight Level Tree Zero Zero").
-*   **"QNH"** -> Speak as **"Q-N-H"** (Letters).
-*   **"RVR"** -> Speak as **"Runway Visual Range"**.
-*   **"CAVOK"** -> Speak as **"KAV-OH-KAY"**.
-*   **"ILS"** -> Speak as **"I-L-S"**.
-*   **"VOR"** -> Speak as **"V-O-R"**.
-*   **"hPa"** -> Speak as **"HEC-TO-PAS-CAL"**.
+**2. STANDARD ALPHABET**
+*   Alpha, Bravo, Charlie, Delta, Echo, Foxtrot, Golf, Hotel, India, Juliett, Kilo, Lima, Mike, November, Oscar, Papa, Quebec, Romeo, Sierra, Tango, Uniform, Victor, Whiskey, X-ray, Yankee, Zulu.
 
-**3. TRANSMISSION TECHNIQUE**
-*   **Digit-by-Digit**: Frequencies, Headings, Runways, Wind, and Transponder codes MUST be spoken digit-by-digit.
-    *   *Heading 300*: "Heading **TREE ZE-RO ZE-RO**" (NOT "Three Hundred").
-    *   *Runway 09*: "Runway **ZE-RO NIN-er**".
-    *   *QNH 1013*: "QNH **WUN ZE-RO WUN TREE**".
-    *   *Speed 250*: "Speed **TOO FIFE ZE-RO** knots".
-    *   *Frequency 118.1*: "One One Eight **DAY-SEE-MAL** One".
-*   **Hundred/Thousand**: Only used for visibility or cloud height (e.g., "Visibility Wun **TOU-SAND** five hundred meters"). Flight Levels ending in 00 usually spoken digit-by-digit in strict ICAO (e.g. FL100 -> One Zero Zero), though "One Hundred" is common regionally. **Stick to digits for consistency.**
+**3. ACRONYMS & TECHNICAL TERMS**
+*   Expect and Use: ILS, VOR, RNAV, TCAS, QNH, QFE, Squawk, Mayday, Pan-Pan.
+*   Do NOT autocorrect these to common English words.
 
 **4. STANDARD WORDS**
 *   "Yes" -> **"AFFIRM"**
@@ -481,7 +461,8 @@ Speak like a busy, professional controller, NOT like a teacher.
       airportCode: string = "",
       accentEnabled: boolean = false, 
       cockpitNoiseEnabled: boolean = false, 
-      customSystemInstruction?: string
+      customSystemInstruction?: string,
+      logicRules?: string // NEW: Dynamic Rules Injection
   ) {
     // 1. Clean up potential previous sessions or contexts
     await this.disconnect();
@@ -607,7 +588,10 @@ Speak like a busy, professional controller, NOT like a teacher.
     `;
 
     // Extract dynamic environment settings to be reusable
+    // NEW: Inject Logic Rules here
     const environmentContext = `
+    ${logicRules || ""} 
+
     ${ICAO_PRONUNCIATION_GUIDE}
 
     ${airportInstruction}
@@ -876,33 +860,30 @@ Speak like a busy, professional controller, NOT like a teacher.
             // --- UPDATED ASSESSMENT PROMPT (ICAO DOC 9835 COMPLIANT) ---
             const prompt = `
             # ROLE: ICAO Aviation English Examiner & Senior ATC
-            # TASK: Conduct a rigorous assessment of the Pilot's Radiotelephony (RTF) performance.
+            # TASK: Conduct a rigorous assessment of the Pilot's Radiotelephony (RTF) performance based on the transcript.
             
             ## CRITICAL SCORING MATRIX (ICAO DOC 9835)
             
-            ### 1. PRONUNCIATION (Balance L1 Tolerance vs ICAO Standards)
-            - **CRITICAL RULE**: "Tree" (3), "Fife" (5), "Niner" (9), "Tou-sand" (1000) are MANDATORY.
-            - **PENALIZE**: Use of standard English "Three", "Five", "Nine". Use of "Point" instead of "Decimal" (unless USA).
-            - **TOLERATE**: L1 (Mother Tongue) accent features (e.g. Th-stopping /s/ instead of /θ/) IF they do not cause ambiguity.
-            - **SCORE 5/6**: Can have an accent, but numbers and aviation terms are ICAO standard.
-            
-            ### 2. FLUENCY (Redefined for Aviation)
-            - **GOLD STANDARD**: Mechanical, direct, steady, rhythmic ("Machine-gun" style is NOT bad if clear).
-            - **DO NOT PENALIZE**: Lack of emotion, robotic tone, or simple sentence structures.
-            - **PENALIZE**: Distracting fillers ("Uh", "Um"), prolonged unnatural pauses, stuttering that degrades clarity.
-            
-            ### 3. STRUCTURE (Global vs Local)
-            - **IGNORE**: Minor grammatical errors (missing "the/a", prepositions) IF meaning is clear.
-            - **PENALIZE**: Errors that change operational meaning (e.g. "climb" vs "descend" confusion).
-            
-            ### 4. VOCABULARY (Technical Precision)
-            - **CRITICAL**: Use of standard acronyms (ILS, QNH, TCAS) is expected.
-            - **BONUS**: Successful Paraphrasing when specific terms are unknown.
-            
-            ### 5. INTERACTIONS (Closed-Loop)
-            - **SUCCESS**: If ATC says "Negative" and Pilot self-corrects immediately -> **HIGH SCORE**.
-            - **SUCCESS**: If Pilot asks "Say again" due to complexity -> **HIGH SCORE** (Situational Awareness).
-            - **FAILURE**: Pilot reads back incorrect numbers without catching it.
+            ### RULE 1: PHONETIC AND VOCABULARY STRICTNESS (CRITICAL)
+            - **NUMBERS**: You MUST penalize non-standard numbers.
+              - "Three" instead of "Tree" -> **ERROR** (Pronunciation)
+              - "Five" instead of "Fife" -> **ERROR** (Pronunciation)
+              - "Nine" instead of "Niner" -> **ERROR** (Pronunciation)
+              - "Thousand" instead of "Tou-sand" -> **ERROR** (Pronunciation)
+            - **ALPHABET**: Standard ICAO (Alpha, Bravo...) is mandatory.
+            - **TERMS**: Technical terms (ILS, QNH, Squawk) must be used correctly. Do not accept common English equivalents.
+            - **NOTE**: The transcript is AI-generated. If you see "Three", assume the pilot SAID "Three" (Incorrect) unless context strongly suggests otherwise. However, grade strictly on INTENT and STRUCTURE.
+
+            ### RULE 2: FLUENCY REDEFINED
+            - **DEFINITION**: In aviation, "Fluency" means concise, unambiguous, and steady rate.
+            - **GOLD STANDARD**: Mechanical, direct, highly structured delivery.
+            - **PENALIZE**: Distracting fillers ("Uh", "Um"), prolonged unnatural pauses, stuttering.
+            - **DO NOT PENALIZE**: Lack of emotional expression, robotic tone, simple grammar.
+
+            ### RULE 3: INTERACTION LOGIC (Closed-Loop)
+            - **SUCCESS**: Pilot corrects themselves after "Negative".
+            - **SUCCESS**: Pilot asks "Say again" when instructions are complex.
+            - **FAILURE**: Pilot reads back incorrect data without catching it.
             
             ## INPUT TRANSCRIPT
             ${this.fullTranscript}
@@ -912,11 +893,12 @@ Speak like a busy, professional controller, NOT like a teacher.
             **IMPORTANT:** All explanations/notes must be in **SIMPLIFIED CHINESE (简体中文)**.
             
             - **overallScore**: The Integer result of the LOWEST dimension.
-            - **executiveSummary.frictionPoints**: Identify the "Lowest Driving Factor".
+            - **executiveSummary.assessment**: Your "Expert_Comment". Brief, direct feedback focused purely on operational safety.
             - **deepAnalysis**: Map your 'Evidence Log'. 
-              - 'context': The exact user quote.
+              - 'context': The exact user quote from the transcript.
               - 'issue': The ICAO error type (e.g. "Pronunciation - Non-Standard Digit").
-              - 'correction': The ICAO standard phrase (e.g. "Climb Flight Level One Zero Zero").
+              - 'correction': The correct ICAO standard phrase (e.g. "Climb Flight Level One Zero Zero").
+              - 'theory': Why this is a failure based on ICAO 9835.
             `;
 
             const response = await model.generateContent({

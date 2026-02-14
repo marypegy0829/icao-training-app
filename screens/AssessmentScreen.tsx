@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { LiveClient } from '../services/liveClient';
 import { scenarioService } from '../services/scenarioService';
+import { ruleService } from '../services/ruleService';
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, DifficultyLevel } from '../types';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
@@ -199,6 +200,13 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     // Initial mute state based on PTT setting
     liveClientRef.current.setInputMuted(isPttEnabled);
 
+    // FETCH DYNAMIC RULES FROM SUPABASE
+    let dynamicRules = "";
+    if (scenario.phase) {
+        console.log(`Fetching rules for phase: ${scenario.phase}`);
+        dynamicRules = await ruleService.getLogicRulesForPhase(scenario.phase);
+    }
+
     // Connect with the global difficulty setting AND selected Airport
     try {
         // Dynamic Airport Code passed here -> Triggers Accent Logic in LiveClient
@@ -258,7 +266,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 liveClientRef.current?.disconnect();
             }, 500);
           }
-        }, difficulty, selectedAirportCode, accentEnabled, cockpitNoise); 
+        }, difficulty, selectedAirportCode, accentEnabled, cockpitNoise, undefined, dynamicRules); // Added logicRules
     } catch (err: any) {
         console.error("Immediate Connection Failure:", err);
         setStatus(ConnectionStatus.ERROR);
