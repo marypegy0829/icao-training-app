@@ -133,13 +133,23 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
       console.log("Saving session to history...", finalAssessment ? "With Report" : "No Report");
       const durationSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
       
-      await userService.saveSession(
-          scenario.title,
-          scenario.phase || 'Assessment',
-          finalAssessment,
-          durationSeconds,
-          'ASSESSMENT' // Explicitly mark as Assessment
-      );
+      try {
+          const result = await userService.saveSession(
+              scenario.title,
+              scenario.phase || 'Assessment',
+              finalAssessment,
+              durationSeconds,
+              'ASSESSMENT' // Explicitly mark as Assessment
+          );
+          if (!result.success) {
+              console.error("SAVE FAILED:", result.error);
+              // Not alerting user to avoid interrupting flow, but logging explicitly
+          } else {
+              console.log("SESSION SAVED SUCCESSFULLY");
+          }
+      } catch (e) {
+          console.error("Save Exception:", e);
+      }
   };
 
   const startBriefing = async () => {

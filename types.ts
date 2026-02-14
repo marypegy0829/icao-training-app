@@ -83,5 +83,8 @@ export interface AssessmentData {
   remedialPlan: string[]; // List of actionable advice
   
   // Backward compatibility
-  feedback?: string; 
+  feedback?: string;
+  
+  // Context Injection
+  scenarioTitle?: string;
 }

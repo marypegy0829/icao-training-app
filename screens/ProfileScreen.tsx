@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { DifficultyLevel, AssessmentData } from '../types';
 import { userService, UserProfile } from '../services/userService';
 import { authService } from '../services/authService';
@@ -41,17 +41,17 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [customKey, setCustomKey] = useState('');
   const [showKeyInput, setShowKeyInput] = useState(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-        setLoading(true);
+  const fetchProfileData = useCallback(async () => {
+        // Don't set global loading here to avoid flashing UI on refresh
         const uid = await userService.getCurrentUserId();
+        if (!uid) return;
         
         try {
             const [profData, logsData, achData, mistakesData] = await Promise.all([
                 userService.getProfile(),
                 userService.getHistory(),
-                uid ? achievementService.getUserAchievements(uid) : Promise.resolve([]),
-                uid ? mistakeService.getMistakes(uid) : Promise.resolve([])
+                achievementService.getUserAchievements(uid),
+                mistakeService.getMistakes(uid)
             ]);
             
             if (profData) setProfile(profData as UserProfile);
@@ -63,12 +63,25 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
             if (savedKey) setCustomKey(savedKey);
         } catch (e) {
             console.error("Profile data load error", e);
-        } finally {
-            setLoading(false);
         }
-    };
-    fetchData();
   }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchProfileData().finally(() => setLoading(false));
+  }, [fetchProfileData]);
+
+  // Handle closing report and refreshing data (to show newly added mistakes)
+  const handleCloseReport = () => {
+      setSelectedReport(null);
+      fetchProfileData();
+  };
+
+  const handleCloseModal = () => {
+      setActiveModal(null);
+      // Also refresh when closing mistake book in case items were deleted
+      fetchProfileData();
+  };
 
   const handleSaveKey = () => {
       if (customKey.trim()) {
@@ -91,9 +104,28 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const handleToggleMistake = async (id: string, currentStatus: boolean) => {
       try {
           await mistakeService.toggleMastered(id, !currentStatus);
-          setMistakes(prev => prev.map(m => m.id === id ? { ...m, is_mastered: !currentStatus } : m));
+          // Optimistic update
+          setMistakes(prev => prev.map(m => {
+              if (m.id === id) {
+                  return { 
+                      ...m, 
+                      is_mastered: !currentStatus, 
+                      review_count: m.review_count + 1 // Increment locally
+                  };
+              }
+              return m;
+          }));
       } catch (e) {
           console.error("Failed to update mistake", e);
+      }
+  };
+
+  const handleDeleteMistake = async (id: string) => {
+      try {
+          await mistakeService.deleteMistake(id);
+          setMistakes(prev => prev.filter(m => m.id !== id));
+      } catch (e) {
+          console.error("Failed to delete mistake", e);
       }
   };
 
@@ -157,7 +189,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
                         <div 
                             className="h-full bg-gradient-to-r from-ios-blue to-ios-indigo rounded-full transition-all duration-1000" 
-                            style={{width: `${(displayProfile.current_icao_level / 6) * 100}%`}}
+                            style={{width: `${(displayProfile.current_icao_level! / 6) * 100}%`}}
                         ></div>
                     </div>
                 </div>
@@ -226,7 +258,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-400 to-indigo-500 shadow-lg shadow-blue-200 p-3 flex flex-col justify-between text-left transition-transform active:scale-95 group"
               >
                   <div className="absolute top-0 right-0 p-2 opacity-20 text-white transform group-hover:scale-110 transition-transform">
-                      <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                      <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                   </div>
                   <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-white">
                       <span className="text-lg">✈️</span>
@@ -351,7 +383,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
               Log Out
           </button>
           <p className="text-center text-[10px] text-gray-400 mt-4">
-              v3.2 • Connected to Supabase
+              v3.3 • Connected to Supabase
           </p>
       </div>
 
@@ -360,7 +392,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
       {activeModal === 'achievements' && (
           <AchievementsModal 
             achievements={achievements} 
-            onClose={() => setActiveModal(null)} 
+            onClose={handleCloseModal} 
           />
       )}
 
@@ -368,16 +400,18 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <MistakeBookModal 
             mistakes={mistakes}
             onToggleMastered={handleToggleMistake}
-            onClose={() => setActiveModal(null)}
+            onDelete={handleDeleteMistake}
+            onClose={handleCloseModal}
           />
       )}
 
       {activeModal === 'logs' && (
           <HistoryModal 
-            onClose={() => setActiveModal(null)}
+            onClose={handleCloseModal}
             initialFilter="ALL"
             onSelectReport={(data) => {
                 setSelectedReport(data);
+                // Don't clear modal type immediately, transition to report
                 setActiveModal(null);
             }}
           />
@@ -386,7 +420,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
       {selectedReport && (
           <AssessmentReport 
             data={selectedReport} 
-            onClose={() => setSelectedReport(null)}
+            onClose={handleCloseReport}
           />
       )}
 

@@ -89,10 +89,6 @@ export const userService = {
                     Comprehension: Number(stats.avg_comprehension) || 3.0,
                     Interactions: Number(stats.avg_interactions) || 3.0
                 };
-                
-                // Optionally update the cached current_icao_level based on the calculated Lowest Driving Factor from the DB?
-                // For now, we trust the profile's current_icao_level as it represents the "Latest Certified Level", 
-                // whereas the view is an "Average Performance".
             }
         } catch (e) {
             console.warn("Failed to sync with pilot_competency_view", e);
@@ -137,23 +133,45 @@ export const userService = {
         return newProfile;
     },
 
-    // Fetch test reports (History)
+    // Fetch test reports list (Optimized: No Details Blob)
     async getHistory() {
         const uid = await this.getCurrentUserId();
         if (!uid) return [];
 
-        // Corrected table name to match SQL setup: 'training_logs'
+        // Selecting only necessary columns for the list view to save bandwidth
         const { data, error } = await supabase
             .from('training_logs')
-            .select('*')
+            .select('id, created_at, scenario_title, phase, score, duration, session_type')
             .eq('user_id', uid)
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false })
+            .limit(50); // Add limit for safety, pagination can be added later
 
         if (error) {
             console.error('Error fetching history:', error);
             return [];
         }
         return data;
+    },
+
+    // New method: Lazy load the full report details only when requested
+    async getSessionDetails(sessionId: string): Promise<AssessmentData | null> {
+        const { data, error } = await supabase
+            .from('training_logs')
+            .select('details, scenario_title') // FETCH scenario_title as well
+            .eq('id', sessionId)
+            .single();
+
+        if (error || !data) {
+            console.error("Failed to load session details", error);
+            return null;
+        }
+        
+        // Merge scenario title into the blob for easier access in UI
+        const report = data.details as AssessmentData;
+        if (report) {
+            report.scenarioTitle = data.scenario_title;
+        }
+        return report;
     },
 
     // Save a new test report and update stats
@@ -163,12 +181,20 @@ export const userService = {
         assessment: AssessmentData | null, 
         durationSeconds: number,
         sessionType: SessionType = 'TRAINING' // New parameter
-    ) {
+    ): Promise<{ success: boolean; error?: any }> {
         const uid = await this.getCurrentUserId();
-        if (!uid) return;
+        if (!uid) return { success: false, error: 'User not logged in' };
+
+        // --- FIX: Zero Score Prevention ---
+        // If assessment is null (e.g. aborted session), do not save to DB.
+        if (!assessment) {
+            console.log("Session aborted or no assessment generated. Skipping DB save to maintain data quality.");
+            // We return success=true so the UI doesn't show an error, but we intentionally didn't save.
+            return { success: true };
+        }
 
         const durationStr = `${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`;
-        const score = assessment ? assessment.overallScore : 0;
+        const score = assessment.overallScore;
 
         // 1. Insert Report into 'training_logs' with structured scoring columns
         const { error: logError } = await supabase
@@ -183,44 +209,43 @@ export const userService = {
                 session_type: sessionType,
                 details: assessment, // Keep JSONB for UI rendering details
                 // --- New Structured Fields for SQL Analytics ---
-                score_pronunciation: assessment?.pronunciation || null,
-                score_structure: assessment?.structure || null,
-                score_vocabulary: assessment?.vocabulary || null,
-                score_fluency: assessment?.fluency || null,
-                score_comprehension: assessment?.comprehension || null,
-                score_interactions: assessment?.interactions || null,
-                is_operational: assessment ? (assessment.overallScore >= 4) : false,
-                fail_reason: assessment?.executiveSummary?.frictionPoints || null
+                score_pronunciation: assessment.pronunciation || null,
+                score_structure: assessment.structure || null,
+                score_vocabulary: assessment.vocabulary || null,
+                score_fluency: assessment.fluency || null,
+                score_comprehension: assessment.comprehension || null,
+                score_interactions: assessment.interactions || null,
+                is_operational: assessment.overallScore >= 4,
+                fail_reason: assessment.executiveSummary?.frictionPoints || null
             });
 
-        if (logError) console.error('Error saving report:', logError);
+        if (logError) {
+            console.error('Error saving report:', logError);
+            return { success: false, error: logError };
+        }
 
         // 2. Update Profile Stats
-        // Note: We still perform this update as a fallback/cache, but getProfile now prioritizes the View.
         const currentProfile = await this.getProfile();
         if (currentProfile) {
             const flightTimeHours = durationSeconds / 3600;
             
-            // Update skills average if assessment exists
+            // Update skills average
             let newSkills: Skills = currentProfile.skills;
             
-            if (assessment) {
-                // Simple weighted average logic retained for immediate UI updates if view is lagging,
-                // though getProfile() will fix it on next load.
-                const updateSkill = (oldVal: any, newVal: number) => {
-                    const numOld = typeof oldVal === 'number' ? oldVal : 3;
-                    return parseFloat((numOld * 0.8 + newVal * 0.2).toFixed(1));
-                };
+            // Simple weighted average logic retained for immediate UI updates
+            const updateSkill = (oldVal: any, newVal: number) => {
+                const numOld = typeof oldVal === 'number' ? oldVal : 3;
+                return parseFloat((numOld * 0.8 + newVal * 0.2).toFixed(1));
+            };
 
-                newSkills = {
-                    Pronunciation: updateSkill(newSkills.Pronunciation, assessment.pronunciation),
-                    Structure: updateSkill(newSkills.Structure, assessment.structure),
-                    Vocabulary: updateSkill(newSkills.Vocabulary, assessment.vocabulary),
-                    Fluency: updateSkill(newSkills.Fluency, assessment.fluency),
-                    Comprehension: updateSkill(newSkills.Comprehension, assessment.comprehension),
-                    Interactions: updateSkill(newSkills.Interactions, assessment.interactions),
-                };
-            }
+            newSkills = {
+                Pronunciation: updateSkill(newSkills.Pronunciation, assessment.pronunciation),
+                Structure: updateSkill(newSkills.Structure, assessment.structure),
+                Vocabulary: updateSkill(newSkills.Vocabulary, assessment.vocabulary),
+                Fluency: updateSkill(newSkills.Fluency, assessment.fluency),
+                Comprehension: updateSkill(newSkills.Comprehension, assessment.comprehension),
+                Interactions: updateSkill(newSkills.Interactions, assessment.interactions),
+            };
 
             await supabase
                 .from('profiles')
@@ -230,7 +255,7 @@ export const userService = {
                     streak: (currentProfile.streak || 0) + 1, 
                     skills: newSkills,
                     // If it's an assessment, update current level immediately if passed
-                    ...(sessionType === 'ASSESSMENT' && assessment && assessment.overallScore >= 4 
+                    ...(sessionType === 'ASSESSMENT' && assessment.overallScore >= 4 
                         ? { current_icao_level: assessment.overallScore } 
                         : {})
                 })
@@ -239,5 +264,7 @@ export const userService = {
             // 3. Trigger Achievement Check
             await achievementService.checkAchievements(uid, sessionType, score);
         }
+        
+        return { success: true };
     }
 };

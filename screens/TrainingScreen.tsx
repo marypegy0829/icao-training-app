@@ -195,17 +195,35 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
 
   // --- Actions ---
 
-  const saveToSupabase = async (finalAssessment: AssessmentData | null) => {
-      if (!activeScenario) return;
+  // FIX: Accept scenario explicitly to avoid closure state traps
+  const saveToSupabase = async (finalAssessment: AssessmentData | null, targetScenario: Scenario | null) => {
+      // Use the passed targetScenario if available, otherwise fall back to state (for handleStop case)
+      const scenarioToSave = targetScenario || activeScenario;
+      
+      if (!scenarioToSave) {
+          console.warn("Cannot save session: No scenario context.");
+          return;
+      }
+
+      console.log("Saving training session...", finalAssessment ? "With Report" : "No Report");
       const durationSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
       
-      await userService.saveSession(
-          activeScenario.title,
-          activeScenario.phase || 'General',
-          finalAssessment,
-          durationSeconds,
-          'TRAINING' // Explicitly mark as Training
-      );
+      try {
+          const result = await userService.saveSession(
+              scenarioToSave.title,
+              scenarioToSave.phase || 'General',
+              finalAssessment,
+              durationSeconds,
+              'TRAINING' // Explicitly mark as Training
+          );
+          if (!result.success) {
+              console.error("Training Save Failed:", result.error);
+          } else {
+              console.log("Training Session Saved Successfully");
+          }
+      } catch (e) {
+          console.error("Training Save Exception:", e);
+      }
   };
 
   const handleReconnect = async () => {
@@ -311,7 +329,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
       },
       onAssessment: (data) => {
           setAssessment(data);
-          saveToSupabase(data);
+          // FIX: Pass the local 'scenario' variable to avoid closure trap where activeScenario state might be null
+          saveToSupabase(data, scenario);
           setStatus(ConnectionStatus.DISCONNECTED);
           liveClientRef.current?.disconnect();
       }
@@ -324,7 +343,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           await liveClientRef.current.finalize();
       } else {
           if (status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING) {
-              saveToSupabase(null);
+              // Pass activeScenario here because handleStop is called on current render
+              saveToSupabase(null, activeScenario);
           }
           setView('dashboard');
       }

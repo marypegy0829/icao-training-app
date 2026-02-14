@@ -23,7 +23,7 @@ const App: React.FC = () => {
   // Settings State
   const [difficulty, setDifficulty] = useState<DifficultyLevel>(DifficultyLevel.LEVEL_4_RECURRENT);
   const [accentEnabled, setAccentEnabled] = useState<boolean>(false); 
-  const [cockpitNoise, setCockpitNoise] = useState<boolean>(true); // New Noise State
+  const [cockpitNoise, setCockpitNoise] = useState<boolean>(false); // Default OFF
 
   // Helper to check profile status
   const checkProfile = async () => {

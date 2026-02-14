@@ -139,36 +139,51 @@ const assessmentToolDefinition: FunctionDeclaration = {
 
 const tools: Tool[] = [{ functionDeclarations: [assessmentToolDefinition] }];
 
-// --- ICAO DOC 9835 PRONUNCIATION STANDARDS ---
+// --- ICAO DOC 9835 PRONUNCIATION STANDARDS (ENHANCED) ---
 const ICAO_PRONUNCIATION_GUIDE = `
-### **ICAO DOC 9835 PRONUNCIATION STANDARDS (MANDATORY)**
-You MUST adhere to the following ICAO Radiotelephony spelling alphabet and pronunciation guide. 
-DO NOT use standard English pronunciation for the following numbers and terms.
+### **ICAO DOC 9835 STRICT PRONUNCIATION RULES (MANDATORY)**
+You MUST follow these pronunciation rules exactly. Do not use standard conversational English pronunciation for the items below.
 
-**1. NUMBERS (CRITICAL)**
+**1. PHONETIC NUMBERS (ABSOLUTE RULE)**
+When speaking headings, flight levels, runways, or frequencies, you MUST use these phonetics:
 *   **0**: ZE-RO (Stress 1st syllable)
-*   **1**: WUN (Strong, sharp)
-*   **2**: TOO (Sharp 'T')
-*   **3**: **TREE** (NO 'Th' sound. Like a tree in a forest.)
-*   **4**: **FOW-er** (Two distinct syllables. Not 'For'.)
-*   **5**: **FIFE** (Hard 'F' at the end. Not 'Five'.)
+*   **1**: WUN (Sharp)
+*   **2**: TOO (Sharp T)
+*   **3**: **TREE** (Like a tree. NEVER 'Three' with 'th')
+*   **4**: **FOW-er** (Two syllables. NEVER 'For')
+*   **5**: **FIFE** (Hard 'F' at end. NEVER 'Five' with 'v')
 *   **6**: SIX
 *   **7**: SEV-en
 *   **8**: AIT
-*   **9**: **NIN-er** (Two syllables. Stress 1st. Ends with 'er'.)
-*   **Decimal**: **DAY-SEE-MAL** (Do NOT say "Point".)
-*   **Thousand**: **TOU-SAND** (No 'Th' sound.)
+*   **9**: **NIN-er** (Two syllables. Ends with 'er'. NEVER 'Nine')
+*   **1000**: **TOU-SAND** (No 'th' sound. Start with 'T'.)
+*   **.**: **DAY-SEE-MAL** (NEVER 'Point' unless in USA region.)
 
-**2. ALPHABET**
-Use standard NATO/ICAO phonetics: Alpha, Bravo, Charlie, Delta, Echo, Foxtrot, Golf, Hotel, India, Juliet, Kilo, Lima, Mike, November, Oscar, Papa, Quebec, Romeo, Sierra, Tango, Uniform, Victor, Whiskey, X-ray, Yankee, Zulu.
+**2. ABBREVIATION EXPANSION (SPEAK FULL WORDS)**
+You must expand standard abbreviations in speech.
+*   **"FL"** -> Speak as **"FLIGHT LEVEL"** (e.g., "FL300" -> "Flight Level Tree Zero Zero").
+*   **"QNH"** -> Speak as **"Q-N-H"** (Letters).
+*   **"RVR"** -> Speak as **"Runway Visual Range"**.
+*   **"CAVOK"** -> Speak as **"KAV-OH-KAY"**.
+*   **"ILS"** -> Speak as **"I-L-S"**.
+*   **"VOR"** -> Speak as **"V-O-R"**.
+*   **"hPa"** -> Speak as **"HEC-TO-PAS-CAL"**.
 
 **3. TRANSMISSION TECHNIQUE**
-*   **Digit-by-Digit**: Frequencies, Headings, Runways, and Wind direction MUST be spoken digit-by-digit.
-    *   *Example*: "Heading 300" -> "Heading **TREE ZE-RO ZE-RO**" (NOT "Three Hundred").
-    *   *Example*: "Runway 09" -> "Runway **ZE-RO NIN-er**".
-    *   *Example*: "QNH 1013" -> "QNH **WUN ZE-RO WUN TREE**".
-    *   *Exception*: Flight Levels can be spoken as hundreds if ending in 00 (e.g. "Flight Level Three Hundred" is occasionally acceptable in some regions, but ICAO prefers "Flight Level **TREE ZE-RO ZE-RO**". **Stick to digits**).
-*   **Rate of Speech**: Maintain approx 100 words per minute. Pause slightly before and after numbers.
+*   **Digit-by-Digit**: Frequencies, Headings, Runways, Wind, and Transponder codes MUST be spoken digit-by-digit.
+    *   *Heading 300*: "Heading **TREE ZE-RO ZE-RO**" (NOT "Three Hundred").
+    *   *Runway 09*: "Runway **ZE-RO NIN-er**".
+    *   *QNH 1013*: "QNH **WUN ZE-RO WUN TREE**".
+    *   *Speed 250*: "Speed **TOO FIFE ZE-RO** knots".
+    *   *Frequency 118.1*: "One One Eight **DAY-SEE-MAL** One".
+*   **Hundred/Thousand**: Only used for visibility or cloud height (e.g., "Visibility Wun **TOU-SAND** five hundred meters"). Flight Levels ending in 00 usually spoken digit-by-digit in strict ICAO (e.g. FL100 -> One Zero Zero), though "One Hundred" is common regionally. **Stick to digits for consistency.**
+
+**4. STANDARD WORDS**
+*   "Yes" -> **"AFFIRM"**
+*   "No" -> **"NEGATIVE"**
+*   "Repeat" -> **"SAY AGAIN"**
+*   "Okay/Received" -> **"ROGER"**
+*   "Execute" -> **"WILCO"**
 `;
 
 export class LiveClient {
@@ -273,8 +288,10 @@ export class LiveClient {
               `;
           case DifficultyLevel.LEVEL_4_RECURRENT:
               return `
-              - **DIFFICULTY: MEDIUM (Level 4 Recurrent)**.
-              - SPEECH: Speak at a normal, conversational pace.
+              - **DIFFICULTY: MEDIUM (Level 4 Recurrent / Operational)**.
+              - **CRITICAL SPEECH RATE**: Speak at a **STANDARD ATC OPERATIONAL PACE (Fast & Fluent)**. 
+              - Do NOT slow down artificially. The user is a qualified pilot.
+              - SPEECH: Use standard operational tempo (approx 100-110 WPM). Only slow down if the user asks "Say Again".
               - VOCABULARY: Standard phraseology mixed with occasional plain English for non-routine situations.
               - ATTITUDE: Professional and efficient.
               - COMPLEXITY: Standard routine operations with minor complications.
@@ -282,7 +299,7 @@ export class LiveClient {
           case DifficultyLevel.LEVEL_4_TO_5:
               return `
               - **DIFFICULTY: HIGH (Level 4-5 Upgrade)**.
-              - SPEECH: Speak quickly but clearly.
+              - SPEECH: Speak FAST and naturalistically (120+ WPM).
               - VOCABULARY: Use varied vocabulary and idiomatic expressions appropriate for aviation.
               - ATTITUDE: Professional but less helpful. Expect the pilot to understand implied instructions.
               - COMPLEXITY: Introduce compound instructions (e.g., "Turn left heading 090, climb FL240, after passing ABC direct XYZ").
@@ -290,7 +307,7 @@ export class LiveClient {
           case DifficultyLevel.LEVEL_5_TO_6:
               return `
               - **DIFFICULTY: EXTREME (Level 6 Examiner)**.
-              - SPEECH: Speak FAST and naturalistically. Use a slight accent if possible.
+              - SPEECH: Speak VERY FAST and naturalistically (Native speed). Use a slight accent if possible.
               - VOCABULARY: Extensive, nuanced vocabulary.
               - ATTITUDE: Strict and demanding. Do not repeat unless asked.
               - COMPLEXITY: High workload. Introduce subtle failures and conflicting information to test situational awareness.
@@ -334,14 +351,20 @@ export class LiveClient {
   // --- NEW: Enhanced Accent Prompts ---
   private getAccentInstruction(airportCode: string, enabled: boolean): string {
       if (!enabled || !airportCode || airportCode.length < 2) {
-          return "- **ACCENT**: Use Standard ICAO English / Generic US/UK Accent. Clear and Neutral.";
+          return "- **ACCENT**: Use Standard ICAO English / Generic US/UK Accent. Clear and Neutral. Use 'DAY-SEE-MAL'.";
       }
 
       const code = airportCode.toUpperCase();
       const prefix = code.substring(0, 2);
       const prefix1 = code.substring(0, 1);
 
-      const base = "!!! CRITICAL VOICE INSTRUCTION !!!\nACT AS A LOCAL ATC CONTROLLER. IMPERSONATE THE ACCENT DESCRIBED BELOW. DO NOT SPEAK STANDARD AMERICAN ENGLISH.";
+      // FORCE SPEED INSTRUCTION: Prevent the model from slowing down when "acting"
+      const base = `
+!!! CRITICAL VOICE INSTRUCTION !!!
+ACT AS A LOCAL ATC CONTROLLER. IMPERSONATE THE ACCENT DESCRIBED BELOW.
+**CRITICAL**: DO NOT SLOW DOWN TO EMPHASIZE THE ACCENT. MAINTAIN A FAST, OPERATIONAL ATC PACE (100+ WPM).
+Speak like a busy, professional controller, NOT like a teacher.
+`;
 
       // --- ASIA ---
       if (prefix1 === 'Z') { // China
@@ -349,7 +372,7 @@ export class LiveClient {
 ### **🌏 REGION Z (China) - "Beijing/Shanghai Control"**
 * **Phonology**: /θ/ -> /s/ (Tree->Sree), Final consonants swallowed.
 * **Prosody**: Staccato, forceful, high volume.
-* **Lexical**: Strict use of "Decimal", "Standby".
+* **Lexical**: Strict use of "DAY-SEE-MAL", "Standby".
 * **Example**: "Air China 981, radar contact. Turn right heading 090."`;
       }
       if (prefix === 'RK') { // Korea
@@ -358,7 +381,7 @@ export class LiveClient {
 * **Phonology**: P/F merger (Frequency->Prequency), R/L liquid sound.
 * **Prosody**: Syllable-timed, distinct high-low-high pitch at end of phrases.
 * **Lexical**: Very polite structure.
-* **Example**: "Korean Air 85, change prequency one two one decimal pipe."`;
+* **Example**: "Korean Air 85, change prequency one two one DAY-SEE-MAL pipe."`;
       }
       if (prefix1 === 'V') { // India / SE Asia
           return `${base}
@@ -629,6 +652,7 @@ export class LiveClient {
     - If the user makes a readback error, correct them immediately as a real ATC would ("Negative, [correction]").
     - Introduce realistic pauses, radio static simulation (via speech nuances), and urgency matching the situation.
     - If the user fails to understand twice, use "Plain English" to clarify, but mark it as a vocabulary/comprehension issue.
+    - **MANDATORY PRONUNCIATION**: You MUST enforce the ICAO pronunciation guide defined above. Specifically "TREE", "FIFE", "NINER", "TOU-SAND" and "FLIGHT LEVEL" expansion.
     `;
 
     // UPDATED LOGIC: Even if a custom instruction is provided (e.g. Training Mode),
@@ -852,6 +876,22 @@ export class LiveClient {
             const prompt = `
             # Role: Senior ICAO Language Proficiency Examiner & Boeing Check Airman
             # Task: Assess Pilot Aviation English Competency
+            
+            ### [CRITICAL SCORING ADJUSTMENT FOR CHINESE PILOTS]
+            You are assessing a pilot who speaks English as a second language (L1 = Chinese). You must apply **OPERATIONAL TOLERANCE**:
+
+            1.  **PRONUNCIATION (Calibration: Level 5)**:
+                -   **ACCEPT** regional accents (e.g., Th-stopping, rhythm differences) if they do not block meaning.
+                -   **Level 5 Criteria**: The accent is evident but *rarely* interferes with ease of understanding.
+                -   Do NOT penalize for strictly complying with ICAO phonetics (e.g., saying "Tree" instead of "Three" is CORRECT, not an error).
+
+            2.  **STRUCTURE (Calibration: Level 5)**:
+                -   **IGNORE** Local Errors: Missing articles (a/the), minor preposition errors, or singular/plural mismatches that do NOT affect the safety message.
+                -   **Level 5 Criteria**: Basic structures are well controlled. Complex structures are *attempted* and usually succeed, even with minor flaws.
+
+            3.  **VOCABULARY (Calibration: Level 5)**:
+                -   **VALUE PARAPHRASING**: If the user lacks a specific word but successfully explains the concept using other words, reward this as a Level 5 skill (Paraphrasing), do NOT penalize it.
+                -   Focus on aviation technical accuracy over literary/idiomatic elegance.
             
             ## 1. MISSION PROFILE
             Analyze the following pilot transcript according to ICAO Doc 9835.

@@ -29,13 +29,14 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
           }
           await mistakeService.addMistake(
               uid, 
-              "Assessment Session", // Or pass scenario title via props if available
+              data.scenarioTitle || "Assessment Session", 
               item.context, 
               item.correction, 
               item.issue, 
               item.theory
           );
           setSavedMistakeIndices(prev => [...prev, idx]);
+          // Optional: Tiny toast or feedback could go here, but button state change is enough
       } catch (e) {
           console.error("Failed to save mistake", e);
           alert("保存失败 (Failed to save)");
@@ -292,7 +293,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
           <section className="page-break-before">
              <div className="flex items-center space-x-3 mb-6 border-b border-gray-100 pb-3 print:border-gray-300">
                 <div className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center print:bg-black">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                 </div>
                 <h2 className="text-lg font-bold text-gray-900 uppercase tracking-tight">Root Cause Analysis <span className="text-gray-400 font-normal ml-2 print:text-gray-600">错误溯源</span></h2>
              </div>
