@@ -112,7 +112,7 @@ const assessmentSchema: Schema = {
         type: Type.OBJECT,
         properties: {
           context: { type: Type.STRING, description: "Transcript Quote: 'User said: ...'" },
-          issue: { type: Type.STRING, description: "Error Type (e.g., [STRUCTURE] Global Error)." },
+          issue: { type: Type.STRING, description: "Error Type (e.g., [PRONUNCIATION] Non-Standard Digits)." },
           theory: { type: Type.STRING, description: "Why this is a failure based on ICAO 9835 (Chinese)." },
           rootCause: { type: Type.STRING, description: "Likely cause (L1 interference, lack of practice) (Chinese)." },
           correction: { type: Type.STRING, description: "The correct standard phraseology (English)." }
@@ -873,87 +873,50 @@ Speak like a busy, professional controller, NOT like a teacher.
             console.log("Generating assessment report using Gemini 3 Pro...");
             const model = this.ai.models;
             
+            // --- UPDATED ASSESSMENT PROMPT (ICAO DOC 9835 COMPLIANT) ---
             const prompt = `
-            # Role: Senior ICAO Language Proficiency Examiner & Boeing Check Airman
-            # Task: Assess Pilot Aviation English Competency
+            # ROLE: ICAO Aviation English Examiner & Senior ATC
+            # TASK: Conduct a rigorous assessment of the Pilot's Radiotelephony (RTF) performance.
             
-            ### [CRITICAL SCORING ADJUSTMENT FOR CHINESE PILOTS]
-            You are assessing a pilot who speaks English as a second language (L1 = Chinese). You must apply **OPERATIONAL TOLERANCE**:
-
-            1.  **PRONUNCIATION (Calibration: Level 5)**:
-                -   **ACCEPT** regional accents (e.g., Th-stopping, rhythm differences) if they do not block meaning.
-                -   **Level 5 Criteria**: The accent is evident but *rarely* interferes with ease of understanding.
-                -   Do NOT penalize for strictly complying with ICAO phonetics (e.g., saying "Tree" instead of "Three" is CORRECT, not an error).
-
-            2.  **STRUCTURE (Calibration: Level 5)**:
-                -   **IGNORE** Local Errors: Missing articles (a/the), minor preposition errors, or singular/plural mismatches that do NOT affect the safety message.
-                -   **Level 5 Criteria**: Basic structures are well controlled. Complex structures are *attempted* and usually succeed, even with minor flaws.
-
-            3.  **VOCABULARY (Calibration: Level 5)**:
-                -   **VALUE PARAPHRASING**: If the user lacks a specific word but successfully explains the concept using other words, reward this as a Level 5 skill (Paraphrasing), do NOT penalize it.
-                -   Focus on aviation technical accuracy over literary/idiomatic elegance.
+            ## CRITICAL SCORING MATRIX (ICAO DOC 9835)
             
-            ## 1. MISSION PROFILE
-            Analyze the following pilot transcript according to ICAO Doc 9835.
-            **CRITICAL RULE:** The final 'overallScore' is NOT an average. It is the **LOWEST** score among the 6 descriptors. (e.g. 5,5,5,5,5,3 => Overall 3).
-
-            ## 2. DETAILED SCORING MATRIX (ICAO STANDARDS)
-
-            ### A. PRONUNCIATION (发音)
-            - **Level 6:** Native or near-native.
-            - **Level 5:** Accent exists but **rarely** interferes with understanding.
-            - **Level 4 (Pass):** Accent evident, **sometimes** interferes but intelligible.
-            - **Level 3 (Fail):** Frequently interferes. Requires constant repetition.
-            - **ICAO Specifics:** Check for correct pronunciation of numbers (TREE, FIFE, NINER) and standard alphabet.
-
-            ### B. STRUCTURE (结构/语法)
-            - **Level 6:** Complex structures well controlled.
-            - **Level 5:** Basic well controlled. Complex attempted with errors but meaning preserved.
-            - **Level 4 (Pass):** Errors in **unexpected circumstances** but rare meaning loss.
-            - **Level 3 (Fail):** Basic structures break down. Errors interfere with meaning.
-
-            ### C. VOCABULARY (词汇)
-            - **Level 6:** Idiomatic, nuanced.
-            - **Level 5:** Wide variety.
-            - **Level 4 (Pass):** Sufficient for work topics. **CRITICAL: Can PARAPHRASE successfully** when lacking vocabulary.
-            - **Level 3 (Fail):** Limited. **Unable to paraphrase**.
-
-            ### D. FLUENCY (流利度)
-            - **Level 6:** Natural, effortless.
-            - **Level 5:** Relative ease. Uses markers effectively.
-            - **Level 4 (Pass):** Appropriate tempo. Fillers not distracting.
-            - **Level 3 (Fail):** Hesitations/slow processing prevent communication. Distracting fillers.
-
-            ### E. COMPREHENSION (理解能力)
-            - **Level 6:** Accurate in all contexts.
-            - **Level 5:** Accurate in unexpected events.
-            - **Level 4 (Pass):** Mostly accurate. Slower in **complications**.
-            - **Level 3 (Fail):** Fails to understand unexpected events.
-
-            ### F. INTERACTIONS (互动能力)
-            - **Level 6:** Ease/Sensitive to cues.
-            - **Level 5:** Immediate/informative.
-            - **Level 4 (Pass):** Maintains exchanges. Deals with misunderstandings by **checking/confirming**.
-            - **Level 3 (Fail):** Slow/inappropriate. Gives up.
-
-            ## 3. CHECK AIRMAN'S "FAIL" TRIGGERS
-            Downgrade immediately if:
-            1. **Safety Hazard:** Confuses critical instructions (Left/Right, Climb/Descend) without correcting.
-            2. **Silence:** Freezes during unexpected events.
-            3. **Script Dependency:** Can only use standard phraseology, fails plain English.
-
-            ## 4. INPUT TRANSCRIPT
+            ### 1. PRONUNCIATION (Balance L1 Tolerance vs ICAO Standards)
+            - **CRITICAL RULE**: "Tree" (3), "Fife" (5), "Niner" (9), "Tou-sand" (1000) are MANDATORY.
+            - **PENALIZE**: Use of standard English "Three", "Five", "Nine". Use of "Point" instead of "Decimal" (unless USA).
+            - **TOLERATE**: L1 (Mother Tongue) accent features (e.g. Th-stopping /s/ instead of /θ/) IF they do not cause ambiguity.
+            - **SCORE 5/6**: Can have an accent, but numbers and aviation terms are ICAO standard.
+            
+            ### 2. FLUENCY (Redefined for Aviation)
+            - **GOLD STANDARD**: Mechanical, direct, steady, rhythmic ("Machine-gun" style is NOT bad if clear).
+            - **DO NOT PENALIZE**: Lack of emotion, robotic tone, or simple sentence structures.
+            - **PENALIZE**: Distracting fillers ("Uh", "Um"), prolonged unnatural pauses, stuttering that degrades clarity.
+            
+            ### 3. STRUCTURE (Global vs Local)
+            - **IGNORE**: Minor grammatical errors (missing "the/a", prepositions) IF meaning is clear.
+            - **PENALIZE**: Errors that change operational meaning (e.g. "climb" vs "descend" confusion).
+            
+            ### 4. VOCABULARY (Technical Precision)
+            - **CRITICAL**: Use of standard acronyms (ILS, QNH, TCAS) is expected.
+            - **BONUS**: Successful Paraphrasing when specific terms are unknown.
+            
+            ### 5. INTERACTIONS (Closed-Loop)
+            - **SUCCESS**: If ATC says "Negative" and Pilot self-corrects immediately -> **HIGH SCORE**.
+            - **SUCCESS**: If Pilot asks "Say again" due to complexity -> **HIGH SCORE** (Situational Awareness).
+            - **FAILURE**: Pilot reads back incorrect numbers without catching it.
+            
+            ## INPUT TRANSCRIPT
             ${this.fullTranscript}
 
-            ## 5. OUTPUT INSTRUCTION (JSON MAPPING)
+            ## OUTPUT INSTRUCTION (JSON MAPPING)
             Map your rigorous analysis to the following JSON structure.
             **IMPORTANT:** All explanations/notes must be in **SIMPLIFIED CHINESE (简体中文)**.
             
             - **overallScore**: The Integer result of the LOWEST dimension.
-            - **executiveSummary.frictionPoints**: Identify the "Lowest Driving Factor" (e.g. "词汇量不足导致无法复述").
-            - **dimensionalDetails**: Provide specific notes for each of the 6 dimensions.
-            - **deepAnalysis**: Map your 'Evidence Log' here. For each error found, provide the 'context' (quote), 'issue' (type), 'theory' (why it's wrong), and 'correction'.
-            - **remedialPlan**: Provide 3 specific training prescriptions.
+            - **executiveSummary.frictionPoints**: Identify the "Lowest Driving Factor".
+            - **deepAnalysis**: Map your 'Evidence Log'. 
+              - 'context': The exact user quote.
+              - 'issue': The ICAO error type (e.g. "Pronunciation - Non-Standard Digit").
+              - 'correction': The ICAO standard phrase (e.g. "Climb Flight Level One Zero Zero").
             `;
 
             const response = await model.generateContent({
