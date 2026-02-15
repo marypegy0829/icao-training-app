@@ -493,8 +493,9 @@ Speak like a busy, professional controller, NOT like a teacher.
       this.stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
             channelCount: 1, 
+            sampleRate: 16000, // Request native 16k if available
             echoCancellation: true,
-            noiseSuppression: true,
+            noiseSuppression: false, // DISABLED to prevent swallowing high-freq consonants (f, s, t)
             autoGainControl: true
         }
       });

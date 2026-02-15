@@ -20,24 +20,31 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// NEW: Downsample any sample rate to 16000Hz using Linear Interpolation
+// IMPROVED: Downsample to 16000Hz using Averaging (Box-car filter)
+// This acts as a simple Low-Pass Filter to prevent aliasing artifacts (hissing/distortion)
+// which significantly improves speech recognition accuracy for consonants (s, f, th).
 export function downsampleTo16k(input: Float32Array, sampleRate: number): Float32Array {
   if (sampleRate === 16000) {
       return input;
   }
-  const targetRate = 16000;
-  const ratio = sampleRate / targetRate;
-  const newLength = Math.round(input.length / ratio);
+  const ratio = sampleRate / 16000;
+  const newLength = Math.floor(input.length / ratio);
   const result = new Float32Array(newLength);
   
   for (let i = 0; i < newLength; i++) {
-    const originalIndex = i * ratio;
-    const index1 = Math.floor(originalIndex);
-    const index2 = Math.min(index1 + 1, input.length - 1);
-    const fraction = originalIndex - index1;
+    const start = Math.floor(i * ratio);
+    const end = Math.floor((i + 1) * ratio);
+    let sum = 0;
+    let count = 0;
     
-    // Linear Interpolation
-    result[i] = input[index1] * (1 - fraction) + input[index2] * fraction;
+    // Averaging filter
+    for (let j = start; j < end && j < input.length; j++) {
+      sum += input[j];
+      count++;
+    }
+    
+    // Avoid division by zero
+    result[i] = count > 0 ? sum / count : input[start];
   }
   return result;
 }

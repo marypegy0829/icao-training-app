@@ -16,7 +16,7 @@ import { useWakeLock } from '../hooks/useWakeLock';
 interface AssessmentScreenProps {
   difficulty: DifficultyLevel;
   accentEnabled: boolean;
-  cockpitNoise: boolean; // New Prop
+  cockpitNoise: boolean;
 }
 
 const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentEnabled, cockpitNoise }) => {
@@ -33,8 +33,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
   const [activeAirport, setActiveAirport] = useState<string>('ZBAA');
 
   // PTT State
-  const [isPttEnabled, setIsPttEnabled] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
+  const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const liveClientRef = useRef<LiveClient | null>(null);
 
@@ -87,6 +87,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     }
     return () => {
       liveClientRef.current?.disconnect();
+      if (pttTimeoutRef.current) clearTimeout(pttTimeoutRef.current);
     };
   }, []);
 
@@ -103,21 +104,41 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     return () => clearTimeout(timeoutId);
   }, [status]);
 
-  // Keyboard Listeners for PTT
+  // PTT Logic Wrapper
+  const engagePtt = () => {
+      if (status === ConnectionStatus.CONNECTED) {
+          if (pttTimeoutRef.current) {
+              clearTimeout(pttTimeoutRef.current);
+              pttTimeoutRef.current = null;
+          }
+          if (!isTransmitting) {
+              setIsTransmitting(true);
+              liveClientRef.current?.setInputMuted(false);
+          }
+      }
+  };
+
+  const releasePtt = () => {
+      if (status === ConnectionStatus.CONNECTED) {
+          setIsTransmitting(false);
+          // Add 600ms tail buffer to catch end of sentence
+          pttTimeoutRef.current = setTimeout(() => {
+              liveClientRef.current?.setInputMuted(true);
+          }, 600);
+      }
+  };
+
+  // Keyboard Listeners for Spacebar PTT
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && isPttEnabled && status === ConnectionStatus.CONNECTED) {
-        if (!isTransmitting) {
-          setIsTransmitting(true);
-          liveClientRef.current?.setInputMuted(false);
-        }
+      if (e.code === 'Space' && !e.repeat) {
+          engagePtt();
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && isPttEnabled && status === ConnectionStatus.CONNECTED) {
-        setIsTransmitting(false);
-        liveClientRef.current?.setInputMuted(true);
+      if (e.code === 'Space') {
+          releasePtt();
       }
     };
 
@@ -127,7 +148,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isPttEnabled, status, isTransmitting]);
+  }, [status, isTransmitting]);
 
   const saveToSupabase = async (finalAssessment: AssessmentData | null) => {
       if (!scenario) return;
@@ -140,11 +161,10 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
               scenario.phase || 'Assessment',
               finalAssessment,
               durationSeconds,
-              'ASSESSMENT' // Explicitly mark as Assessment
+              'ASSESSMENT'
           );
           if (!result.success) {
               console.error("SAVE FAILED:", result.error);
-              // Not alerting user to avoid interrupting flow, but logging explicitly
           } else {
               console.log("SESSION SAVED SUCCESSFULLY");
           }
@@ -155,7 +175,6 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
 
   const startBriefing = async () => {
      try {
-       // Async fetch from DB (cached)
        const s = await scenarioService.getRandomAssessmentScenario();
        setScenario(s);
        setStatus(ConnectionStatus.BRIEFING);
@@ -167,23 +186,20 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
      }
   };
   
-  // Handler for Refreshing Scenario within Briefing Modal
   const handleRefreshScenario = async () => {
       const s = await scenarioService.getRandomAssessmentScenario();
       setScenario(s);
   };
 
-  // Re-connect logic without changing scenario
   const handleReconnect = async () => {
     if (scenario) {
-      handleConnect(activeAirport); // Reuse last selected airport
+      handleConnect(activeAirport);
     } else {
       startBriefing();
     }
   };
 
   const handleConnect = async (selectedAirportCode: string) => {
-    // 1. Strict Check for API Key
     if (!API_KEY) {
         setErrorMsg("缺少 API Key。请检查设置。");
         setStatus(ConnectionStatus.ERROR);
@@ -191,25 +207,21 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     }
     if (!scenario) return;
     
-    // Save selection
     setActiveAirport(selectedAirportCode);
-
     setStatus(ConnectionStatus.CONNECTING);
+    setMessages([]); // Clear previous transcript
+    
     liveClientRef.current = new LiveClient(API_KEY);
     
-    // Initial mute state based on PTT setting
-    liveClientRef.current.setInputMuted(isPttEnabled);
+    // FORCE PTT MODE: Start muted
+    liveClientRef.current.setInputMuted(true);
 
-    // FETCH DYNAMIC RULES FROM SUPABASE
     let dynamicRules = "";
     if (scenario.phase) {
-        console.log(`Fetching rules for phase: ${scenario.phase}`);
         dynamicRules = await ruleService.getLogicRulesForPhase(scenario.phase);
     }
 
-    // Connect with the global difficulty setting AND selected Airport
     try {
-        // Dynamic Airport Code passed here -> Triggers Accent Logic in LiveClient
         await liveClientRef.current.connect(scenario, {
           onOpen: () => {
               console.log(`Connection Established at ${selectedAirportCode}`);
@@ -266,7 +278,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 liveClientRef.current?.disconnect();
             }, 500);
           }
-        }, difficulty, selectedAirportCode, accentEnabled, cockpitNoise, undefined, dynamicRules); // Added logicRules
+        }, difficulty, selectedAirportCode, accentEnabled, cockpitNoise, undefined, dynamicRules);
     } catch (err: any) {
         console.error("Immediate Connection Failure:", err);
         setStatus(ConnectionStatus.ERROR);
@@ -279,7 +291,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
       setStatus(ConnectionStatus.ANALYZING);
       await liveClientRef.current.finalize();
     } else {
-      if (status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING) {
+      const currentStatus = status; // Break potential TS narrowing
+      if (currentStatus === ConnectionStatus.CONNECTED || currentStatus === ConnectionStatus.ANALYZING) {
           saveToSupabase(null);
       }
       setStatus(ConnectionStatus.DISCONNECTED);
@@ -288,40 +301,36 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     }
   };
 
-  // Toggle PTT Mode
-  const togglePtt = () => {
-    const newState = !isPttEnabled;
-    setIsPttEnabled(newState);
-    if (!newState && liveClientRef.current) {
-        liveClientRef.current.setInputMuted(false);
-        setIsTransmitting(false);
-    }
-    if (newState && liveClientRef.current) {
-        liveClientRef.current.setInputMuted(true);
-        setIsTransmitting(false);
-    }
-  };
-
-  // Handle onTouchStart/End for mobile PTT button
+  // PTT Handlers (Mouse/Touch)
   const handlePttDown = (e?: React.SyntheticEvent) => {
-    if (e) e.preventDefault(); // Prevent text selection/menu
-    if (status === ConnectionStatus.CONNECTED) {
-        setIsTransmitting(true);
-        liveClientRef.current?.setInputMuted(false);
-    }
+    if (e) e.preventDefault();
+    engagePtt();
   };
   const handlePttUp = (e?: React.SyntheticEvent) => {
     if (e) e.preventDefault();
-    if (status === ConnectionStatus.CONNECTED) {
-        setIsTransmitting(false);
-        liveClientRef.current?.setInputMuted(true);
-    }
+    releasePtt();
   };
+
+  // Helper for main button state
+  const getMainActionState = () => {
+      switch (status) {
+          case ConnectionStatus.CONNECTED:
+              return { label: '交卷', color: 'bg-red-500 hover:bg-red-600 shadow-red-200', icon: 'stop' };
+          case ConnectionStatus.ANALYZING:
+              return { label: '生成中...', color: 'bg-gray-400', icon: 'loading' };
+          case ConnectionStatus.CONNECTING:
+              return { label: '连接中...', color: 'bg-gray-400', icon: 'loading' };
+          default:
+              return { label: '开始测试', color: 'bg-ios-blue hover:bg-blue-600 shadow-blue-200', icon: 'play' };
+      }
+  };
+
+  const actionState = getMainActionState();
 
   return (
     <div className="h-full w-full relative flex flex-col bg-ios-bg overflow-hidden text-ios-text font-sans">
       
-      {/* Loading Overlay with Transition */}
+      {/* Loading Overlay */}
       {status === ConnectionStatus.ANALYZING && (
           <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white animate-fade-in">
               <div className="relative">
@@ -331,15 +340,11 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                   </div>
               </div>
               <h2 className="text-2xl font-bold mt-6 mb-2">正在分析表现</h2>
-              <div className="flex flex-col space-y-1 text-center text-sm text-white/80">
-                  <p>处理语言模式...</p>
-                  <p>评估 ICAO 合规性...</p>
-                  <p>生成评估报告...</p>
-              </div>
+              <p className="text-sm text-white/80">生成 ICAO 评估报告中...</p>
           </div>
       )}
 
-      {/* Assessment Modal - Renders on top */}
+      {/* Assessment Modal */}
       {assessment && (
         <AssessmentReport 
           data={assessment} 
@@ -373,7 +378,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
       <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-sky-200/40 rounded-full blur-[100px] animate-blob mix-blend-multiply pointer-events-none"></div>
       <div className="absolute top-[10%] right-[-10%] w-[500px] h-[500px] bg-orange-100/60 rounded-full blur-[100px] animate-blob animation-delay-2000 mix-blend-multiply pointer-events-none"></div>
       
-      {/* Header */}
+      {/* --- HEADER --- */}
       <header className="z-20 pt-12 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
         <div>
            <div className="flex items-center space-x-2 mb-1">
@@ -382,35 +387,44 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
            </div>
            <h1 className="text-2xl font-bold tracking-tight text-ios-text">AI 模拟考官</h1>
         </div>
-        <div className="flex flex-col items-end">
-           <div className="flex items-center space-x-2 mb-1">
-               <div className="bg-white/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-ios-border shadow-sm">
-                  <span className="text-xs font-semibold text-ios-subtext">{difficulty}</span>
-               </div>
-               
-               {/* History Button (Only visible when not in active call) */}
-               {status === ConnectionStatus.DISCONNECTED && (
-                  <button 
-                    onClick={() => setShowHistory(true)}
-                    className="flex items-center space-x-1.5 bg-gradient-to-r from-ios-blue to-ios-indigo text-white px-3 py-1.5 rounded-full shadow-md hover:shadow-lg hover:scale-105 transition-all active:scale-95"
-                  >
-                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                     </svg>
-                     <span className="text-xs font-bold">历史报告</span>
-                  </button>
-               )}
-           </div>
+        
+        {/* Top Right Controls - Combined Logic */}
+        <div className="flex items-center space-x-2">
+           
+           {/* 1. Main Action Button (Start / Submit) */}
            <button 
-             onClick={togglePtt}
-             className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${isPttEnabled ? 'bg-ios-text text-white border-ios-text' : 'bg-transparent text-ios-subtext border-transparent hover:border-black/10'}`}
-           >
-             {isPttEnabled ? 'PTT 模式 (按住)' : '开放麦模式'}
-           </button>
+                onClick={status === ConnectionStatus.CONNECTED ? handleStop : startBriefing}
+                disabled={status === ConnectionStatus.CONNECTING || status === ConnectionStatus.ANALYZING || (!API_KEY && status === ConnectionStatus.DISCONNECTED)}
+                className={`h-10 px-4 ${actionState.color} text-white rounded-full font-bold text-sm shadow-lg active:scale-95 transition-all flex items-center disabled:opacity-50 disabled:shadow-none min-w-[100px] justify-center`}
+            >
+                {actionState.icon === 'loading' ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                ) : actionState.icon === 'stop' ? (
+                    <div className="w-3 h-3 bg-white rounded-sm mr-2"></div>
+                ) : (
+                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                )}
+                {actionState.label}
+            </button>
+
+            {/* 2. History Report Button (Eye-catching) */}
+            <button 
+                onClick={() => setShowHistory(true)}
+                className="h-10 px-4 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-full font-bold text-sm shadow-lg shadow-orange-200 hover:shadow-orange-300 active:scale-95 transition-all flex items-center"
+            >
+                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+                历史报告
+            </button>
+
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* --- MAIN CONTENT --- */}
       <main className="z-10 flex-1 flex flex-col relative overflow-hidden">
         
         {/* Upper: Visualizer & Cockpit */}
@@ -419,7 +433,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
            <CockpitDisplay 
                 active={status === ConnectionStatus.CONNECTED} 
                 scenario={scenario} 
-                airportCode={activeAirport} // Pass active airport
+                airportCode={activeAirport} 
            />
         </div>
 
@@ -428,7 +442,6 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             <div className="px-6 py-3 border-b border-black/5 flex justify-between items-center bg-white/40 backdrop-blur-md z-20">
                 <span className="text-xs font-semibold text-ios-subtext">实时对话记录 (Live Transcript)</span>
                 {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">正在连接...</span>}
-                {/* Show Current Airport Code */}
                 {status === ConnectionStatus.CONNECTED && (
                     <span className="text-[10px] font-mono font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded border border-gray-200">
                         {activeAirport}
@@ -436,7 +449,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 )}
             </div>
             
-            {/* NEW: Pinned Situation Box (Pinned to top of transcript area) - Font size increased */}
+            {/* Pinned Situation Box */}
             {scenario && (
               <div className="px-6 py-4 bg-yellow-50/80 backdrop-blur-sm border-b border-yellow-100/50 z-10 shrink-0 shadow-sm transition-all animate-fade-in">
                   <div className="flex items-start space-x-3">
@@ -455,7 +468,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
               </div>
             )}
             
-            {/* Error Overlay with Retry */}
+            {/* Error Overlay */}
             {status === ConnectionStatus.ERROR && errorMsg && (
               <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
                 <div className="w-12 h-12 bg-ios-red/10 rounded-full flex items-center justify-center mb-4">
@@ -487,28 +500,13 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
 
       </main>
 
-      {/* Footer Controls for Assessment */}
-      <footer className="z-20 py-4 px-6 bg-ios-bg border-t border-ios-border/50">
-        {status === ConnectionStatus.DISCONNECTED || status === ConnectionStatus.ERROR ? (
-           <button
-             onClick={startBriefing}
-             disabled={!API_KEY}
-             className="w-full h-12 rounded-full bg-ios-text text-white font-semibold text-lg shadow-lg hover:scale-[1.02] active:scale-95 transition-all duration-300 flex items-center justify-center space-x-2 disabled:opacity-50"
-           >
-             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-             </svg>
-             <span>开始考试 (Start Interview)</span>
-           </button>
-        ) : status === ConnectionStatus.BRIEFING ? (
-            <div className="w-full h-12 flex items-center justify-center text-ios-subtext text-sm animate-pulse">
-                正在审核任务简报...
-            </div>
-        ) : (
-           <div className="flex space-x-3">
-             
-             {/* PTT Button - Only visible in PTT Mode */}
-             {isPttEnabled && (
+      {/* --- FOOTER (CONTROLS) --- */}
+      {status === ConnectionStatus.CONNECTED && (
+          <footer className="z-20 py-4 px-6 bg-ios-bg border-t border-ios-border/50 animate-slide-up">
+             {/* Simplified Footer: Just the PTT Button */}
+             <div className="flex justify-center items-center h-16">
+                 
+                 {/* PTT Button (Main Interaction) */}
                  <button
                     onMouseDown={handlePttDown}
                     onMouseUp={handlePttUp}
@@ -517,36 +515,29 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     onTouchEnd={handlePttUp}
                     onTouchCancel={handlePttUp}
                     onContextMenu={(e) => e.preventDefault()}
-                    className={`flex-1 h-12 rounded-full font-bold text-lg shadow-lg transition-all duration-100 flex items-center justify-center border select-none touch-none
+                    className={`w-full max-w-sm rounded-2xl font-bold text-lg shadow-lg transition-all duration-100 flex flex-col items-center justify-center select-none touch-none ring-offset-2 h-full
                     ${isTransmitting 
-                        ? 'bg-ios-orange text-white border-ios-orange scale-95' 
-                        : 'bg-white text-ios-text border-gray-200'}`}
+                        ? 'bg-ios-orange text-white scale-95 ring-2 ring-ios-orange' 
+                        : 'bg-white text-ios-text border border-gray-200 active:bg-gray-50'}`}
                  >
-                    {isTransmitting ? '正在通话' : '按住说话'}
+                    <span className="text-xl mb-0.5">
+                        {isTransmitting ? '🎙️' : '🎤'}
+                    </span>
+                    <span className="text-xs uppercase tracking-wider opacity-80">
+                        {isTransmitting ? '正在说话 (Speaking)' : '按住说话 (Hold to Speak)'}
+                    </span>
                  </button>
-             )}
 
-             <button
-                onClick={handleStop}
-                disabled={status === ConnectionStatus.ANALYZING}
-                className={`${isPttEnabled ? 'w-14' : 'flex-1'} h-12 rounded-full border border-ios-border bg-white text-ios-red shadow-soft hover:bg-red-50 active:scale-95 transition-all flex items-center justify-center`}
-             >
-                {status === ConnectionStatus.ANALYZING ? (
-                   <div className="flex items-center space-x-2">
-                      <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-ios-red rounded-full"></div>
-                      <span className="text-xs font-bold text-ios-red">生成报告...</span>
-                   </div>
-                ) : (
-                   isPttEnabled ? (
-                       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                   ) : (
-                       <span className="font-semibold text-lg">结束考试</span>
-                   )
-                )}
-             </button>
-           </div>
-        )}
-      </footer>
+             </div>
+          </footer>
+      )}
+      
+      {/* Empty Footer Placeholder when Disconnected (Optional for spacing/visual balance) */}
+      {status === ConnectionStatus.DISCONNECTED && (
+          <div className="py-6 text-center opacity-30 pointer-events-none">
+              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Ready for Assessment</p>
+          </div>
+      )}
 
     </div>
   );
