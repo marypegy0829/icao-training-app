@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type, Tool, Schema } from '@google/genai';
-import { base64ToBytes, decodeAudioData, downsampleTo16k } from './audioUtils';
-import { AssessmentData, Scenario, DifficultyLevel } from '../types';
+import { base64ToBytes, decodeAudioData, downsampleTo16k, resampleTo16k, normalizeAudio } from './audioUtils';
+import { AssessmentData, Scenario, DifficultyLevel, FlightPhase } from '../types';
 import { airportService } from './airportService';
 
 interface LiveClientCallbacks {
@@ -141,15 +141,13 @@ const tools: Tool[] = [{ functionDeclarations: [assessmentToolDefinition] }];
 
 // --- ICAO DOC 9835 PRONUNCIATION STANDARDS (ENHANCED) ---
 const ICAO_PRONUNCIATION_GUIDE = `
-### **RULE 1: PHONETIC AND VOCABULARY OVERRIDE (CRITICAL)**
+### **RULE 1: PHONETIC AND VOCABULARY OVERRIDE (OUTPUT GENERATION)**
 You MUST force your recognition and speech generation to adhere to these standards.
 
-**1. MANDATORY PHONETICS**
-*   **3**: **TREE** (Never "Three")
-*   **5**: **FIFE** (Never "Five")
-*   **9**: **NIN-er** (Never "Nine")
-*   **1000**: **TOU-SAND** (Never "Thousand")
-*   **.**: **DAY-SEE-MAL** (Never "Point")
+**1. TRANSCRIPT vs SPEECH (CRITICAL)**
+- **TRANSCRIPT**: In the written transcript, you MUST use standard digits (e.g., "5", "3", "9", "1000", ".").
+- **SPEECH**: When speaking, you MUST pronounce them as ICAO phonetics ("FIFE", "TREE", "NIN-er", "TOU-SAND", "DAY-SEE-MAL").
+- **USER INPUT**: The user will speak "Fife", "Tree", "Niner". You must transcribe this as "5", "3", "9".
 
 **2. STANDARD ALPHABET**
 *   Alpha, Bravo, Charlie, Delta, Echo, Foxtrot, Golf, Hotel, India, Juliett, Kilo, Lima, Mike, November, Oscar, Papa, Quebec, Romeo, Sierra, Tango, Uniform, Victor, Whiskey, X-ray, Yankee, Zulu.
@@ -166,6 +164,144 @@ You MUST force your recognition and speech generation to adhere to these standar
 *   "Execute" -> **"WILCO"**
 `;
 
+// --- TRIPLE-LOCK STRATEGY: ASR INTELLIGENT CORRECTION LAYER ---
+const ASR_CORRECTION_GUIDE = `
+<ASR_Override_Engine>
+  <Global_Directive>
+    You are listening to non-native English speakers (often Chinese L1). 
+    Your goal is **WHOLE SENTENCE UNDERSTANDING**.
+    Do NOT transcribe word-for-word if it results in gibberish.
+    **INFER THE INTENT** based on the current Flight Phase and Context.
+  </Global_Directive>
+
+  <!-- LAYER 2: SINO-PHONETIC MAPPING -->
+  <Chinese_Accent_Decoder>
+    <Rule_S>
+       Users often pronounce /θ/ (think) as /s/ (sink) or /f/ (fink).
+       - "Sree" -> "Three"
+       - "Sou-sand" -> "Thousand"
+       - "Norse" -> "North"
+       - "Sinking" -> "Thinking"
+    </Rule_S>
+    <Rule_W>
+       /v/ and /w/ are often swapped.
+       - "Wector" -> "Vector"
+       - "Wisual" -> "Visual"
+       - "Runvay" -> "Runway"
+       - "Cleah" -> "Clear"
+    </Rule_W>
+    <Rule_J>
+       /ʒ/ or /dʒ/ might sound harder.
+       - "Duliett" -> "Juliett"
+    </Rule_J>
+    <Rule_Vowel_Insertion>
+       Expect extra vowels after consonants.
+       - "Six-u" -> "Six"
+       - "Fog-u" -> "Fog"
+       - "Dog-u" -> "Dog"
+    </Rule_Vowel_Insertion>
+    <Rule_Final_Drop>
+       Expect dropped final consonants.
+       - "Grou" -> "Ground"
+       - "Hol" -> "Hold"
+       - "Ligh" -> "Light"
+    </Rule_Final_Drop>
+  </Chinese_Accent_Decoder>
+
+  <!-- LAYER 3: INTENT-FIRST FUZZY LOGIC -->
+  <Intent_Slot_Filling>
+    <Directive>If grammar is broken, extract: [VERB] + [VALUE] + [NOUN]</Directive>
+    <Examples>
+       - Input: "We need uh... go down... make level... two zero zero." -> Output: "Request descent Flight Level 200."
+       - Input: "Open the gear." -> Output: "Gear Down."
+       - Input: "Close the light." -> Output: "Turn off lights."
+       - Input: "We have big wind." -> Output: "Reporting strong winds."
+       - Input: "Make speed small." -> Output: "Reducing speed."
+       - Input: "Can not." -> Output: "Unable."
+    </Examples>
+  </Intent_Slot_Filling>
+
+  <ASR_Override_Dictionary>
+    <Module name="Phonetics_And_Numbers">
+      <Map sound="tree" target="Tree" />
+      <Map sound="fife" target="Fife" />
+      <Map sound="niner" target="Niner" />
+      <Map sound="two sand" | "two sound" target="Thousand" />
+      <Map sound="point" target="Decimal" />
+      <Map sound="jiro" | "ziro" target="Zero" />
+    </Module>
+    <Module name="Emergencies_Weather">
+      <Map sound="tolerance" | "tolerate" target="Turbulence" />
+      <Map sound="turbans" target="Turbulence" />
+      <Map sound="devotion" | "divert action" target="Deviation" />
+      <Map sound="win share" target="Windshear" />
+    </Module>
+    <Module name="Common_Fixes">
+      <Map sound="whole short" target="Hold short" />
+      <Map sound="stand by" target="Standby" />
+      <Map sound="line up awake" target="Line up and wait" />
+      <Map sound="clear the land" target="Cleared to land" />
+    </Module>
+  </ASR_Override_Dictionary>
+</ASR_Override_Engine>
+`;
+
+// --- NEW: FLIGHT LOGIC STATE MACHINE (UPDATED FROM XML) ---
+const FLIGHT_LOGIC_CONSTRAINTS = `
+<Operational_State_Machine>
+  <Rule>Clearance/Taxi: NO takeoff/landing clearances.</Rule>
+  <Rule>Radar_Vectoring: Issue headings/altitudes ONLY. ABSOLUTELY NO "Cleared to land".</Rule>
+  <Rule>Tower_Final: "Cleared to land" permitted ONLY IF established and runway is clear.</Rule>
+</Operational_State_Machine>
+
+<Readback_Verification>
+  You MUST verify the pilot's readback. Runways, Headings, Altitudes, Speeds, QNH, and "Hold Short" MUST be verbatim. If the pilot reads back incorrect numbers, instantly interrupt with: "Negative, [Callsign], [Correct Instruction]."
+</Readback_Verification>
+`;
+
+// --- NEW: REDEFINED EVALUATION METRICS (Pragmatic Approach) ---
+const EVALUATION_METRICS = `
+### **REDEFINED SCORING FOR ICAO LEVEL 4+ (OPERATIONAL EFFECTIVENESS)**
+
+**CORE PRINCIPLE: Safety > Grammar**
+
+1. **OPERATIONAL EFFECTIVENESS (PRIMARY)**
+   - **Safety First**: Did the pilot understand the instruction? Did they fly the plane correctly?
+   - If YES, 'Comprehension' and 'Interactions' MUST be scored favourably (4+), even if grammar was imperfect.
+   - **Intent over Syntax**: "We climbing 300" is acceptable for "Climb Flight Level 300".
+
+2. **FLUENCY = TRANSACTION SPEED**
+   - **Definition**: Fluency is the ability to maintain the flow of communication.
+   - **Do NOT Penalize**: Pauses for thinking, robotic tone, or lack of "politeness".
+   - **Do NOT Penalize**: Strong accents, provided numbers and keywords are distinguishable.
+   - **Penalize**: Long silences that block the frequency, or switching to L1 (Chinese) excessively.
+
+3. **STRUCTURAL TOLERANCE (GRAMMAR)**
+   - **Global Errors**: Errors that cause misunderstanding (e.g., wrong altitude, wrong heading, wrong side). -> **PENALIZE**.
+   - **Local Errors (IGNORE)**: Errors that do NOT affect meaning (e.g., missing "the"/"a", wrong preposition "at" vs "on", wrong tense "will" vs "would"). -> **IGNORE**.
+`;
+
+// --- NEW: SHADOW TRANSLATOR PROTOCOL ---
+const SHADOW_TRANSLATOR_PROTOCOL = `
+### **PROTOCOL: THE SHADOW TRANSLATOR**
+You act as an intelligent filter for non-native speakers.
+
+1. **LISTEN**: Receive raw audio input (e.g., "Request turn right, weather bad" or "Open the light").
+2. **TRANSLATE (INTERNAL)**: Internally convert "Chinglish" or broken phrases into standard operational intent.
+   - "Open light" -> "Turn on lights"
+   - "We go down 3000" -> "Descending to altitude 3000 feet"
+   - "Make speed small" -> "Reducing speed"
+3. **EVALUATE INTENT**: 
+   - If the *translated intent* is safe and correct -> **ACCEPT** the readback/request.
+   - If the *translated intent* is dangerous or ambiguous -> **CLARIFY** ("Say again?").
+4. **RESPOND**: Act as the Controller based on the *translated intent*, not the broken grammar.
+
+**Example**:
+- User: "We go tree six zero."
+- You (Internal): "He means 'Climbing Flight Level 360'." -> Valid Readback.
+- You (External): "Roger, maintain Flight Level 360." (Do NOT scold grammar unless it's a training hint).
+`;
+
 export class LiveClient {
   private ai: GoogleGenAI;
   private inputAudioContext: AudioContext | null = null;
@@ -176,7 +312,14 @@ export class LiveClient {
   private stream: MediaStream | null = null;
   private processor: ScriptProcessorNode | null = null;
   private inputSource: MediaStreamAudioSourceNode | null = null;
+  
+  // State for legacy/OpenMic mode
   private isInputMuted: boolean = false;
+
+  // --- NEW: Buffering Logic for PTT ---
+  private isBufferedMode: boolean = false;
+  private isRecording: boolean = false;
+  private audioBufferQueue: Float32Array[] = [];
   
   // Noise Simulation
   private noiseSource: AudioBufferSourceNode | null = null;
@@ -193,8 +336,104 @@ export class LiveClient {
     this.ai = new GoogleGenAI({ apiKey });
   }
 
+  // --- CONTROLS ---
+
+  /**
+   * Sets the input mode.
+   * @param enabled If true, audio is buffered locally and only sent when stopRecording() is called. 
+   *                If false, audio is streamed continuously (Open Mic).
+   */
+  setBufferedMode(enabled: boolean) {
+      this.isBufferedMode = enabled;
+      console.log(`LiveClient: Buffering Mode ${enabled ? 'ENABLED' : 'DISABLED'}`);
+  }
+
+  /**
+   * Start capturing audio.
+   * UPDATED: Now async to ensure AudioContext is resumed before recording starts.
+   * This prevents the "Head Truncation" (first 1-2 seconds cut off) issue.
+   */
+  async startRecording() {
+      // 1. Pre-warm the AudioContext
+      if (this.inputAudioContext && this.inputAudioContext.state === 'suspended') {
+          try {
+              await this.inputAudioContext.resume();
+              console.log("AudioContext resumed for recording.");
+          } catch (e) {
+              console.warn("Failed to resume input context:", e);
+          }
+      }
+
+      // 2. Enable Recording Flag
+      if (this.isBufferedMode) {
+          this.isRecording = true;
+          this.audioBufferQueue = [];
+      } else {
+          this.setInputMuted(false);
+      }
+  }
+
+  /**
+   * Stop capturing and send data.
+   * In Buffered Mode: Flushes buffer to API.
+   * In Stream Mode: Mutes input.
+   */
+  async stopRecording() {
+      if (this.isBufferedMode) {
+          this.isRecording = false;
+          await this.flushAudioBuffer();
+      } else {
+          this.setInputMuted(true);
+      }
+  }
+
+  // Legacy method for Open Mic toggling
   setInputMuted(muted: boolean) {
     this.isInputMuted = muted;
+  }
+
+  private async flushAudioBuffer() {
+      if (this.audioBufferQueue.length === 0) return;
+
+      // 1. Flatten buffer
+      const totalLength = this.audioBufferQueue.reduce((acc, val) => acc + val.length, 0);
+      const fullBuffer = new Float32Array(totalLength);
+      let offset = 0;
+      for (const chunk of this.audioBufferQueue) {
+          fullBuffer.set(chunk, offset);
+          offset += chunk.length;
+      }
+      this.audioBufferQueue = []; // Clear immediately
+
+      if (!this.inputAudioContext) return;
+
+      try {
+          const currentSampleRate = this.inputAudioContext.sampleRate;
+          
+          // 2. High-Quality Resampling (OfflineAudioContext)
+          // This removes aliasing artifacts (metallic robot voice)
+          const resampledData = await resampleTo16k(fullBuffer, currentSampleRate);
+          
+          // 3. Normalize Volume
+          const normalizedData = normalizeAudio(resampledData);
+          
+          // 4. Convert to Base64
+          const base64Data = this.float32ToBase64(normalizedData);
+
+          // 5. Send One-Shot
+          const session = await this.sessionPromise;
+          if (session && typeof session.sendRealtimeInput === 'function') {
+              console.log("LiveClient: Sending Buffered Audio Chunk (HQ Resampled & Normalized)...");
+              session.sendRealtimeInput({
+                  media: {
+                      mimeType: 'audio/pcm;rate=16000',
+                      data: base64Data
+                  },
+              });
+          }
+      } catch (e) {
+          console.error("Failed to flush audio buffer", e);
+      }
   }
 
   // --- AUDIO GENERATION ENGINE ---
@@ -295,6 +534,40 @@ export class LiveClient {
           default:
               return "";
       }
+  }
+
+  // Layer 1: Dynamic Context Biasing (Phase-Specific Keywords)
+  private getPhaseSpecificKeywords(phase?: FlightPhase): string {
+      if (!phase) return "";
+
+      let keywords: string[] = [];
+
+      switch (phase) {
+          case 'Ground Ops':
+              keywords = ["Pushback", "Tug", "Towbar", "Taxiway", "Holding Point", "Gate", "Slot", "Startup", "Apron", "Ramp", "Stand", "Face East", "Face West", "Brakes"];
+              break;
+          case 'Takeoff & Climb':
+              keywords = ["Takeoff", "Climb", "Runway", "Heading", "Altitude", "Flight Level", "Passing", "Airborne", "Rotate", "V1", "Positive Rate", "Gear Up"];
+              break;
+          case 'Cruise & Enroute':
+              keywords = ["Maintain", "Direct", "Waypoint", "Flight Level", "Mach", "Deviation", "Weather", "Turbulence", "Report", "Crossing", "Estimate", "Offset"];
+              break;
+          case 'Descent & Approach':
+              keywords = ["Descend", "Approach", "ILS", "Localizer", "Glide Slope", "Established", "Miles", "Visual", "Vector", "Intercept", "QNH", "Minimums"];
+              break;
+          case 'Landing & Taxi in':
+              keywords = ["Land", "Runway", "Vacate", "Exit", "Taxi", "Gate", "Stand", "Shut down", "Engine", "Brakes", "Follow Me", "Marshaller"];
+              break;
+          case 'Go-around & Diversion':
+              keywords = ["Go around", "Missed Approach", "Climb", "Divert", "Alternate", "Fuel", "Souls", "Endurance", "Holding", "EAT"];
+              break;
+      }
+
+      return keywords.length > 0 ? `
+### 🎯 DYNAMIC HOTLIST (Current Phase: ${phase})
+Boost the probability of recognizing these words based on the current flight phase:
+${keywords.join(', ')}
+` : "";
   }
 
   // --- NEW: Voice Selection Logic ---
@@ -577,6 +850,9 @@ Speak like a busy, professional controller, NOT like a teacher.
     const voiceName = this.getVoiceName(targetCode, accentEnabled);
     const accentPrompt = this.getAccentInstruction(targetCode, accentEnabled);
     
+    // TRIPLE-LOCK LAYER 1: DYNAMIC KEYWORDS
+    const hotlistPrompt = this.getPhaseSpecificKeywords(scenario.phase);
+
     console.log(`LiveClient Config: Airport=${targetCode}, Accent=${accentEnabled}, Voice=${voiceName}`);
 
     const airportInstruction = `
@@ -594,12 +870,22 @@ Speak like a busy, professional controller, NOT like a teacher.
     ${logicRules || ""} 
 
     ${ICAO_PRONUNCIATION_GUIDE}
+    
+    ${ASR_CORRECTION_GUIDE}
+
+    ${SHADOW_TRANSLATOR_PROTOCOL}
+
+    ${FLIGHT_LOGIC_CONSTRAINTS}
+
+    ${EVALUATION_METRICS}
 
     ${airportInstruction}
 
     ${difficultyPrompt}
     
     ${accentPrompt}
+
+    ${hotlistPrompt}
     `;
 
     const baseInstruction = `
@@ -782,26 +1068,37 @@ Speak like a busy, professional controller, NOT like a teacher.
 
     this.processor.onaudioprocess = (e) => {
       const inputData = e.inputBuffer.getChannelData(0);
-      let dataToProcess = inputData;
 
-      if (this.isInputMuted) {
-          dataToProcess = new Float32Array(inputData.length).fill(0);
+      // --- BRANCHED LOGIC: BUFFERING vs STREAMING ---
+      if (this.isBufferedMode) {
+          if (this.isRecording) {
+              // Create a copy of the buffer to avoid reference issues
+              const chunk = new Float32Array(inputData);
+              this.audioBufferQueue.push(chunk);
+          }
+          // In Buffered Mode, if NOT recording, we do NOT send data.
+          // This creates "silence" naturally by absence of transmission.
+      } else {
+          // --- LEGACY OPEN MIC / STREAMING MODE ---
+          let dataToProcess = inputData;
+          if (this.isInputMuted) {
+              // Send explicit silence to keep stream alive in Open Mic mode if needed
+              dataToProcess = new Float32Array(inputData.length).fill(0);
+          }
+          const downsampledData = downsampleTo16k(dataToProcess, currentSampleRate);
+          const base64Data = this.float32ToBase64(downsampledData);
+          
+          this.sessionPromise?.then((session) => {
+            if (typeof session.sendRealtimeInput === 'function') {
+                session.sendRealtimeInput({
+                    media: {
+                        mimeType: mimeType,
+                        data: base64Data
+                    },
+                });
+            }
+          });
       }
-      
-      const downsampledData = downsampleTo16k(dataToProcess, currentSampleRate);
-      
-      const base64Data = this.float32ToBase64(downsampledData);
-      
-      this.sessionPromise?.then((session) => {
-        if (typeof session.sendRealtimeInput === 'function') {
-            session.sendRealtimeInput({
-                media: {
-                    mimeType: mimeType,
-                    data: base64Data
-                },
-            });
-        }
-      });
     };
 
     this.inputSource.connect(this.processor);
@@ -823,9 +1120,10 @@ Speak like a busy, professional controller, NOT like a teacher.
     }
   }
 
-  // --- NEW FINALIZE STRATEGY ---
   async finalize() {
     console.log("Finalizing session...");
+    // Ensure we stop recording if stuck
+    this.stopRecording(); 
     this.setInputMuted(true); 
     
     console.log("Waiting for trailing transcripts (buffer period)...");
@@ -855,42 +1153,44 @@ Speak like a busy, professional controller, NOT like a teacher.
         }
 
         try {
-            console.log("Generating assessment report using Gemini 3 Pro...");
+            console.log("Generating assessment report using Gemini 3 Flash...");
             const model = this.ai.models;
             
-            // --- UPDATED ASSESSMENT PROMPT (ICAO DOC 9835 COMPLIANT) ---
+            // --- UPDATED ASSESSMENT PROMPT (ICAO DOC 9835 COMPLIANT - PRAGMATIC) ---
             const prompt = `
             # ROLE: ICAO Aviation English Examiner & Senior ATC
             # TASK: Conduct a rigorous assessment of the Pilot's Radiotelephony (RTF) performance based on the transcript.
             
-            ## CRITICAL SCORING MATRIX (ICAO DOC 9835)
+            ## 🛡️ SCORING PROTOCOL: SHADOW TRANSLATOR APPLIED
+            You must apply the "Shadow Translator" logic to this assessment.
+            1. **Look past the literal transcript**: If the user said "Open light", interpret it as "Turn on lights".
+            2. **Judge the INTENT**: If the intent was safe and correct in context, DO NOT penalize Comprehension.
+            3. **Grammar Leniency**: Ignore missing articles (a/the) and minor preposition errors. Focus on **Operational Effectiveness**.
+
+            ## SCORING MATRIX FOR NON-NATIVE SPEAKERS (LEVEL 4+)
             
-            ### RULE 1: PHONETIC AND VOCABULARY STRICTNESS (CRITICAL)
-            - **NUMBERS**: You MUST penalize non-standard numbers.
-              - "Three" instead of "Tree" -> **ERROR** (Pronunciation)
-              - "Five" instead of "Fife" -> **ERROR** (Pronunciation)
-              - "Nine" instead of "Niner" -> **ERROR** (Pronunciation)
-              - "Thousand" instead of "Tou-sand" -> **ERROR** (Pronunciation)
-            - **ALPHABET**: Standard ICAO (Alpha, Bravo...) is mandatory.
-            - **TERMS**: Technical terms (ILS, QNH, Squawk) must be used correctly. Do not accept common English equivalents.
-            - **NOTE**: The transcript is AI-generated. If you see "Three", assume the pilot SAID "Three" (Incorrect) unless context strongly suggests otherwise. However, grade strictly on INTENT and STRUCTURE.
+            ### 1. SAFETY FIRST (CRITICAL)
+            - **PASSING CRITERIA**: Did the pilot successfully convey the operational message?
+            - **INTENT**: If "We go tree six zero" clearly meant "Climbing FL360" in context, mark Comprehension as VALID.
+            - **FAILING CRITERIA**: Any misunderstanding of numbers (heading/altitude/speed) that was NOT corrected.
 
-            ### RULE 2: FLUENCY REDEFINED
-            - **DEFINITION**: In aviation, "Fluency" means concise, unambiguous, and steady rate.
-            - **GOLD STANDARD**: Mechanical, direct, highly structured delivery.
-            - **PENALIZE**: Distracting fillers ("Uh", "Um"), prolonged unnatural pauses, stuttering.
-            - **DO NOT PENALIZE**: Lack of emotional expression, robotic tone, simple grammar.
+            ### 2. PRAGMATIC FLUENCY
+            - **High Score**: Responds reasonably quickly. "Ums" and "Ahs" are allowed if they don't block the frequency.
+            - **Accent**: Do NOT penalize Asian accents (e.g. Th/S confusion) unless it makes the word unintelligible.
 
-            ### RULE 3: INTERACTION LOGIC (Closed-Loop)
-            - **SUCCESS**: Pilot corrects themselves after "Negative".
-            - **SUCCESS**: Pilot asks "Say again" when instructions are complex.
-            - **FAILURE**: Pilot reads back incorrect data without catching it.
+            ### 3. STRUCTURE
+            - Accept "Non-Standard but Clear" phrases as operational.
+            - Only penalize "Confusing" grammar that requires the ATC to ask "Say again".
+
+            ### 4. INTERACTION
+            - Did they ask "Say again" when unsure? (Good CRM = Plus points).
+            - Did they correct themselves? (Good monitoring = Plus points).
             
             ## INPUT TRANSCRIPT
             ${this.fullTranscript}
 
             ## OUTPUT INSTRUCTION (JSON MAPPING)
-            Map your rigorous analysis to the following JSON structure.
+            Map your analysis to the following JSON structure.
             **IMPORTANT:** All explanations/notes must be in **SIMPLIFIED CHINESE (简体中文)**.
             
             - **overallScore**: The Integer result of the LOWEST dimension.
@@ -903,7 +1203,7 @@ Speak like a busy, professional controller, NOT like a teacher.
             `;
 
             const response = await model.generateContent({
-                model: 'gemini-3-pro-preview',
+                model: 'gemini-3-flash-preview',
                 contents: prompt,
                 config: {
                     responseMimeType: 'application/json',

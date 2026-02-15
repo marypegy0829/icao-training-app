@@ -180,7 +180,8 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
       let minScore = 7;
       let weakness = '';
       
-      Object.entries(userSkills).forEach(([key, score]) => {
+      Object.entries(userSkills).forEach(([key, value]) => {
+          const score = value as number;
           if (score < minScore) {
               minScore = score;
               weakness = key;
@@ -338,7 +339,7 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
                          <div className="text-center bg-white/80 backdrop-blur-sm p-1 rounded-lg shadow-sm">
                              <div className="text-[10px] text-gray-500 uppercase font-bold">AVG</div>
                              <div className="text-xl font-bold text-ios-indigo">
-                                 {(Object.values(userSkills).reduce((a, b) => a + b, 0) / 6).toFixed(1)}
+                                 {((Object.values(userSkills) as number[]).reduce((a, b) => a + b, 0) / 6).toFixed(1)}
                              </div>
                          </div>
                      </div>
@@ -377,12 +378,15 @@ const HomeScreen: React.FC<Props> = ({ onNavigate, onStartScenario }) => {
 
                {/* Dimensions Grid (Bottom) */}
                <div className="grid grid-cols-3 gap-2 mt-6 pt-4 border-t border-gray-100">
-                  {Object.entries(userSkills).map(([key, score]) => (
-                      <div key={key} className="text-center">
-                          <div className="text-[9px] text-gray-400 uppercase font-bold truncate">{key}</div>
-                          <div className={`text-sm font-bold ${score < 4 ? 'text-orange-500' : 'text-gray-800'}`}>{score}</div>
-                      </div>
-                  ))}
+                  {Object.entries(userSkills).map(([key, value]) => {
+                      const score = value as number;
+                      return (
+                          <div key={key} className="text-center">
+                              <div className="text-[9px] text-gray-400 uppercase font-bold truncate">{key}</div>
+                              <div className={`text-sm font-bold ${score < 4 ? 'text-orange-500' : 'text-gray-800'}`}>{score}</div>
+                          </div>
+                      );
+                  })}
                </div>
              </>
            )}

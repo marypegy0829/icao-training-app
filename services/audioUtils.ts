@@ -20,9 +20,68 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-// IMPROVED: Downsample to 16000Hz using Averaging (Box-car filter)
-// This acts as a simple Low-Pass Filter to prevent aliasing artifacts (hissing/distortion)
-// which significantly improves speech recognition accuracy for consonants (s, f, th).
+/**
+ * Resamples audio buffer to 16kHz using Web Audio API's OfflineAudioContext.
+ * This provides hardware-accelerated, high-quality interpolation with anti-aliasing.
+ * Solves the "robotic/metallic" voice issue caused by naive downsampling.
+ */
+export async function resampleTo16k(inputData: Float32Array, inputSampleRate: number): Promise<Float32Array> {
+    if (inputSampleRate === 16000) return inputData;
+
+    // Calculate new length
+    const duration = inputData.length / inputSampleRate;
+    const targetLength = Math.ceil(duration * 16000);
+
+    // Create Offline Context
+    // Note: OfflineAudioContext constructor: (numberOfChannels, length, sampleRate)
+    const offlineCtx = new OfflineAudioContext(1, targetLength, 16000);
+    
+    // Create Buffer
+    const buffer = offlineCtx.createBuffer(1, inputData.length, inputSampleRate);
+    buffer.copyToChannel(inputData, 0);
+    
+    // Create Source
+    const source = offlineCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(offlineCtx.destination);
+    source.start();
+
+    // Render
+    const renderedBuffer = await offlineCtx.startRendering();
+    return renderedBuffer.getChannelData(0);
+}
+
+/**
+ * Normalizes audio to approx -2dB (0.8 amplitude).
+ * Ensures consistent volume levels regardless of microphone gain.
+ * Includes a NOISE GATE to prevent amplifying silence/background noise.
+ */
+export function normalizeAudio(inputData: Float32Array): Float32Array {
+    let maxAmp = 0;
+    for (let i = 0; i < inputData.length; i++) {
+        const abs = Math.abs(inputData[i]);
+        if (abs > maxAmp) maxAmp = abs;
+    }
+
+    // NOISE GATE: If max amplitude is below 0.02 (approx -34dB), treat as noise/silence.
+    // Do NOT normalize (amplify) noise.
+    if (maxAmp < 0.02) return inputData;
+
+    // If already loud enough, return original
+    if (maxAmp > 0.99) return inputData;
+
+    // Target 0.8
+    const targetAmp = 0.8;
+    const gain = targetAmp / maxAmp;
+
+    const result = new Float32Array(inputData.length);
+    for (let i = 0; i < inputData.length; i++) {
+        result[i] = inputData[i] * gain;
+    }
+    return result;
+}
+
+// Low-quality realtime downsampler (Keep for streaming/Open Mic mode latency reasons)
 export function downsampleTo16k(input: Float32Array, sampleRate: number): Float32Array {
   if (sampleRate === 16000) {
       return input;
@@ -56,7 +115,6 @@ export async function decodeAudioData(
   numChannels: number,
 ): Promise<AudioBuffer> {
   // Ensure strict alignment for Int16Array by copying if necessary
-  // data.buffer might be a slice of a larger buffer with odd offset
   let alignedData = data;
   if (data.byteOffset % 2 !== 0) {
       alignedData = new Uint8Array(data.length);

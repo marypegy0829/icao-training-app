@@ -80,6 +80,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   // PTT State
   const [isPttEnabled, setIsPttEnabled] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
+  const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const liveClientRef = useRef<LiveClient | null>(null);
 
@@ -118,6 +119,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
 
     return () => {
       liveClientRef.current?.disconnect();
+      if (pttTimeoutRef.current) clearTimeout(pttTimeoutRef.current);
     };
   }, []);
 
@@ -174,16 +176,23 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     if (view !== 'session') return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && isPttEnabled && status === ConnectionStatus.CONNECTED) {
+        if (pttTimeoutRef.current) {
+            clearTimeout(pttTimeoutRef.current);
+            pttTimeoutRef.current = null;
+        }
         if (!isTransmitting) {
           setIsTransmitting(true);
-          liveClientRef.current?.setInputMuted(false);
+          liveClientRef.current?.startRecording();
         }
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space' && isPttEnabled && status === ConnectionStatus.CONNECTED) {
         setIsTransmitting(false);
-        liveClientRef.current?.setInputMuted(true);
+        // Add 1000ms tail padding (Increased from 500ms)
+        pttTimeoutRef.current = setTimeout(() => {
+            liveClientRef.current?.stopRecording();
+        }, 1000);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -253,7 +262,13 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     startTimeRef.current = Date.now();
 
     liveClientRef.current = new LiveClient(API_KEY);
-    liveClientRef.current.setInputMuted(isPttEnabled);
+    // Initialize PTT state (Buffer vs Stream)
+    liveClientRef.current.setBufferedMode(isPttEnabled);
+    if (!isPttEnabled) {
+        liveClientRef.current.setInputMuted(false); // Open Mic: Unmute
+    } else {
+        liveClientRef.current.setInputMuted(true); // PTT Mode: Mute fallback
+    }
 
     // FETCH DYNAMIC RULES FROM SUPABASE
     let dynamicRules = "";
@@ -369,7 +384,15 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     const newState = !isPttEnabled;
     setIsPttEnabled(newState);
     if (liveClientRef.current) {
-        liveClientRef.current.setInputMuted(newState); // If PTT ON, mute initial. If Open Mic, unmute.
+        liveClientRef.current.setBufferedMode(newState);
+        
+        // If switching TO Open Mic (newState=false), ensure input is live
+        if (!newState) {
+             liveClientRef.current.setInputMuted(false);
+        } else {
+             // If switching TO PTT Mode, mute input (so it doesn't stream until pressed)
+             liveClientRef.current.setInputMuted(true);
+        }
         setIsTransmitting(false);
     }
   };
@@ -377,15 +400,22 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   const handlePttDown = (e?: React.SyntheticEvent) => {
     if (e) e.preventDefault();
     if (status === ConnectionStatus.CONNECTED) {
+        if (pttTimeoutRef.current) {
+            clearTimeout(pttTimeoutRef.current);
+            pttTimeoutRef.current = null;
+        }
         setIsTransmitting(true);
-        liveClientRef.current?.setInputMuted(false);
+        liveClientRef.current?.startRecording();
     }
   };
   const handlePttUp = (e?: React.SyntheticEvent) => {
     if (e) e.preventDefault();
     if (status === ConnectionStatus.CONNECTED) {
         setIsTransmitting(false);
-        liveClientRef.current?.setInputMuted(true);
+        // Add 1000ms tail padding (Increased from 500ms)
+        pttTimeoutRef.current = setTimeout(() => {
+            liveClientRef.current?.stopRecording();
+        }, 1000);
     }
   };
 
@@ -638,7 +668,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                onClick={togglePtt}
                className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${isPttEnabled ? 'bg-ios-text text-white border-ios-text' : 'bg-transparent text-ios-subtext border-transparent hover:border-black/10'}`}
              >
-               {isPttEnabled ? 'PTT 模式' : '开放麦'}
+               {isPttEnabled ? 'PTT 模式 (缓冲)' : '开放麦 (流式)'}
              </button>
           </div>
         </header>

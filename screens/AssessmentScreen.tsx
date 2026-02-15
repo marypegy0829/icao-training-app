@@ -113,7 +113,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
           }
           if (!isTransmitting) {
               setIsTransmitting(true);
-              liveClientRef.current?.setInputMuted(false);
+              // Call startRecording (which handles AudioContext resume internally)
+              liveClientRef.current?.startRecording();
           }
       }
   };
@@ -121,10 +122,10 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
   const releasePtt = () => {
       if (status === ConnectionStatus.CONNECTED) {
           setIsTransmitting(false);
-          // Add 600ms tail buffer to catch end of sentence
+          // Add 1000ms tail padding to catch end of sentence (FIXED: increased from 500ms)
           pttTimeoutRef.current = setTimeout(() => {
-              liveClientRef.current?.setInputMuted(true);
-          }, 600);
+              liveClientRef.current?.stopRecording();
+          }, 1000);
       }
   };
 
@@ -213,8 +214,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     
     liveClientRef.current = new LiveClient(API_KEY);
     
-    // FORCE PTT MODE: Start muted
-    liveClientRef.current.setInputMuted(true);
+    // FORCE PTT BUFFERED MODE for Assessment
+    liveClientRef.current.setBufferedMode(true);
 
     let dynamicRules = "";
     if (scenario.phase) {
@@ -524,7 +525,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                         {isTransmitting ? '🎙️' : '🎤'}
                     </span>
                     <span className="text-xs uppercase tracking-wider opacity-80">
-                        {isTransmitting ? '正在说话 (Speaking)' : '按住说话 (Hold to Speak)'}
+                        {isTransmitting ? '正在说话 (Recording...)' : '按住说话 (Hold to Speak)'}
                     </span>
                  </button>
 
