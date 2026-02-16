@@ -5,6 +5,7 @@ import { SCENARIO_CATEGORIES, ScenarioCategory, PHASE_LOGIC_CONFIG, TrainingTag 
 import { scenarioService } from '../services/scenarioService';
 import { airportService, Airport } from '../services/airportService';
 import { ruleService } from '../services/ruleService';
+import { configService } from '../services/configService'; // Import configService
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, FlightPhase, DifficultyLevel, AppLanguage } from '../types';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
@@ -107,6 +108,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
 
   // Handle Airport Search & Sync
   useEffect(() => {
+      // Don't search if not in dashboard view to prevent unnecessary calls during training
+      if (view !== 'dashboard') return;
+
       const delayDebounce = setTimeout(async () => {
           if (airportCode.length >= 2) {
              const results = await airportService.searchAirports(airportCode);
@@ -131,7 +135,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           }
       }, 300);
       return () => clearTimeout(delayDebounce);
-  }, [airportCode]);
+  }, [airportCode, view]);
 
   // Click outside to close dropdown
   useEffect(() => {
@@ -248,11 +252,40 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   };
 
   const startTraining = async (scenario: Scenario) => {
-    if (!process.env.API_KEY) {
-       alert("API Key missing. Please check configuration.");
+    // Fetch API Key
+    const apiKey = await configService.getGoogleApiKey();
+    if (!apiKey) {
+       alert("API Key missing. Check Supabase config.");
        return;
     }
+
+    // --- ACCENT FIX: Ensure we have an airport code ---
+    let sessionAirportCode = airportCode;
+    let sessionAirportData = activeAirport;
+
+    // If no airport selected manually, pick a random one to ensure accents work
+    if (!sessionAirportCode || sessionAirportCode.length < 3) {
+        try {
+            const randomApt = await airportService.getRandomAirport();
+            if (randomApt) {
+                sessionAirportCode = randomApt.icao_code;
+                sessionAirportData = randomApt;
+                console.log("Training: Auto-assigned random airport for accent context:", randomApt.icao_code);
+            } else {
+                // Fallback to ZBAA (Beijing) if DB fails, to ensure at least one accent path exists
+                sessionAirportCode = 'ZBAA'; 
+            }
+        } catch (e) {
+            console.warn("Failed to fetch random airport:", e);
+            sessionAirportCode = 'ZBAA';
+        }
+    }
+
+    // Update state to match session context (so visualizer/cockpit shows correct data)
     setActiveScenario(scenario);
+    setAirportCode(sessionAirportCode);
+    setActiveAirport(sessionAirportData);
+    
     setView('session');
     setStatus(ConnectionStatus.CONNECTING);
     setIsPaused(false); // Reset Pause State
@@ -268,8 +301,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     startTimeRef.current = Date.now();
     lastInputTimeRef.current = Date.now(); // Reset inactivity timer
 
-    // Initialize LiveClient (Key is handled internally)
-    liveClientRef.current = new LiveClient();
+    // Initialize LiveClient (Key is now dynamic)
+    liveClientRef.current = new LiveClient(apiKey);
     
     // TRAINING MODE: Always Open Mic, No PTT buffering
     liveClientRef.current.setBufferedMode(false);
@@ -392,7 +425,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           setStatus(ConnectionStatus.DISCONNECTED);
           liveClientRef.current?.disconnect();
       }
-    }, difficulty, airportCode, accentEnabled, cockpitNoise, coachingInstruction, dynamicRules, language);
+    }, difficulty, sessionAirportCode, accentEnabled, cockpitNoise, coachingInstruction, dynamicRules, language);
   };
 
   const handleStop = async (dueToInactivity = false) => {

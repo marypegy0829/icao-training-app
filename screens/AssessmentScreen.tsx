@@ -4,6 +4,7 @@ import { scenarioService } from '../services/scenarioService';
 import { ruleService } from '../services/ruleService';
 import { userService } from '../services/userService';
 import { airportService, Airport } from '../services/airportService';
+import { configService } from '../services/configService'; // Import configService
 import { LiveClient } from '../services/liveClient';
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, DifficultyLevel, AppLanguage } from '../types';
 import BriefingModal from '../components/BriefingModal';
@@ -45,6 +46,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     
     // PTT State
     const [isTransmitting, setIsTransmitting] = useState(false);
+    // NEW: Processing State (ATC Thinking)
+    const [isProcessing, setIsProcessing] = useState(false); 
     const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Prevent Sleep during exam
@@ -97,8 +100,11 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     };
 
     const startExam = async (examScenario: Scenario, airportCode: string) => {
-        if (!process.env.API_KEY) {
-            setErrorMsg("API Key Config Error");
+        // Fetch API Key (from DB or Env)
+        const apiKey = await configService.getGoogleApiKey();
+        
+        if (!apiKey) {
+            setErrorMsg("API Key Missing. Check Supabase config or .env.");
             setStatus(ConnectionStatus.ERROR);
             return;
         }
@@ -111,11 +117,12 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         setAssessment(null);
         setErrorMsg(null);
         setIsTimeout(false); // Reset timeout state
+        setIsProcessing(false); // Reset processing
         startTimeRef.current = Date.now();
         lastActivityRef.current = Date.now(); // Reset Activity Timer
 
-        // Initialize LiveClient
-        liveClientRef.current = new LiveClient();
+        // Initialize LiveClient with dynamic key
+        liveClientRef.current = new LiveClient(apiKey);
         
         // PTT Only for Assessment (Standardization)
         liveClientRef.current.setBufferedMode(true);
@@ -161,14 +168,24 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 onError: (err) => {
                     setStatus(ConnectionStatus.ERROR);
                     setErrorMsg(err.message);
+                    setIsProcessing(false); // Force clear on error
                 },
                 onAudioData: (level) => setAudioLevel(level),
                 onTurnComplete: () => {
                     setAudioLevel(0);
                     updateActivity();
+                    // CRITICAL FIX: Ensure processing state is cleared when turn completes
+                    // This handles cases where onTranscript might have been missed or delayed
+                    setIsProcessing(false); 
                 },
                 onTranscript: (text, role, isPartial) => {
                     updateActivity(); // User speaking or AI responding counts as activity
+                    
+                    // NEW: If AI starts speaking, stop the "Processing" indicator
+                    if (role === 'ai') {
+                        setIsProcessing(false);
+                    }
+
                     setMessages(prev => {
                         const lastMsg = prev[prev.length - 1];
                         if (role === 'user') {
@@ -196,6 +213,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     setAssessment(data);
                     setStatus(ConnectionStatus.DISCONNECTED);
                     liveClientRef.current?.disconnect();
+                    setIsProcessing(false);
                     
                     // Save to DB
                     const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
@@ -225,6 +243,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         setStatus(ConnectionStatus.DISCONNECTED);
         setView('lobby');
         setIsTimeout(false);
+        setIsProcessing(false);
     };
 
     const handleFinishManually = async () => {
@@ -238,6 +257,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     const engagePtt = () => {
         updateActivity(); // Reset inactivity timer
         if (status === ConnectionStatus.CONNECTED) {
+            // Force clear processing state when user interrupts
+            setIsProcessing(false);
+
             if (pttTimeoutRef.current) {
                 clearTimeout(pttTimeoutRef.current);
                 pttTimeoutRef.current = null;
@@ -254,6 +276,10 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     const releasePtt = () => {
         if (status === ConnectionStatus.CONNECTED) {
             setIsTransmitting(false);
+            // Set Processing State immediately on release
+            // This will be cleared by onTranscript (when AI speaks) or onTurnComplete (timeout)
+            setIsProcessing(true);
+
             pttTimeoutRef.current = setTimeout(() => {
                 liveClientRef.current?.stopRecording();
                 pttTimeoutRef.current = null;
@@ -279,14 +305,16 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         situation: language === 'cn' ? '情景简报' : 'Situation Brief',
         ptt: language === 'cn' ? '按住说话' : 'Push to Talk',
         transmitting: language === 'cn' ? '正在发送...' : 'Transmitting',
-        holdToSpeak: language === 'cn' ? '按住说话' : 'Hold to Speak',
+        holdToSpeak: language === 'cn' ? '按住发言' : 'Hold to Speak', 
         connectionError: language === 'cn' ? '连接错误' : 'Connection Error',
         returnLobby: language === 'cn' ? '返回大厅' : 'Return to Lobby',
         // NEW KEYS
         timeoutTitle: language === 'cn' ? '会话超时' : 'Session Timed Out',
         timeoutDesc: language === 'cn' ? '您已超过3分钟未活动，连接已断开以节省资源。' : 'Disconnected due to inactivity (3 mins).',
         refresh: language === 'cn' ? '重新开始' : 'Restart',
-        standby: language === 'cn' ? '待机中 (省电模式)' : 'Standby (Power Save)'
+        standby: language === 'cn' ? '请回复 ATC' : 'Reply to ATC', 
+        processing: language === 'cn' ? 'ATC 思考中...' : 'ATC Thinking...', 
+        wait: language === 'cn' ? '请等待回复' : 'Please wait' 
     };
 
     // --- RENDERERS ---
@@ -496,28 +524,59 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     className={`
                         group relative w-full max-w-sm h-20 rounded-full flex items-center justify-center transition-all duration-200 select-none touch-none shadow-lg
                         ${status !== ConnectionStatus.CONNECTED ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer active:scale-95'}
-                        ${isTransmitting ? 'bg-red-500 shadow-red-200' : 'bg-white border border-gray-100 shadow-gray-200'}
+                        ${isTransmitting 
+                            ? 'bg-red-500 shadow-red-200 border-transparent text-white' 
+                            : isProcessing 
+                                ? 'bg-amber-100 shadow-amber-200 border border-amber-300 text-amber-900' // Processing State (Amber/Yellow)
+                                : 'bg-green-50 shadow-green-100 border border-green-200 text-green-700' // Idle State (Light Green)
+                        }
                     `}
                  >
                      <div className="flex items-center space-x-3 pointer-events-none relative z-10">
-                         <div className={`p-2 rounded-full transition-colors ${isTransmitting ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                             </svg>
+                         <div className={`p-2 rounded-full transition-colors ${
+                             isTransmitting ? 'bg-white/20 text-white' : 
+                             isProcessing ? 'bg-amber-200 text-amber-700' :
+                             'bg-green-100 text-green-600'
+                         }`}>
+                             {isProcessing ? (
+                                // Spinner Icon for Processing
+                                <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                             ) : (
+                                // Mic Icon for Idle/Transmitting
+                                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg>
+                             )}
                          </div>
                          
                          <div className="flex flex-col items-start">
-                             <span className={`text-base font-bold uppercase tracking-wider transition-colors ${isTransmitting ? 'text-white' : 'text-ios-text'}`}>
-                                 {isTransmitting ? t.transmitting : t.ptt}
+                             <span className={`text-base font-bold uppercase tracking-wider transition-colors`}>
+                                 {isTransmitting 
+                                    ? t.transmitting 
+                                    : isProcessing 
+                                        ? t.processing 
+                                        : t.holdToSpeak
+                                 }
                              </span>
-                             <span className={`text-[10px] font-medium transition-colors ${isTransmitting ? 'text-white/80' : 'text-gray-400'}`}>
-                                 {isTransmitting ? t.holdToSpeak : t.standby}
+                             <span className={`text-[10px] font-medium transition-colors ${isTransmitting ? 'text-white/80' : isProcessing ? 'text-amber-700/70' : 'text-green-700/70'}`}>
+                                 {isTransmitting 
+                                    ? t.holdToSpeak 
+                                    : isProcessing 
+                                        ? t.wait 
+                                        : t.standby
+                                 }
                              </span>
                          </div>
                      </div>
                      
                      {isTransmitting && (
                          <div className="absolute inset-[-6px] rounded-full border-2 border-red-500/30 animate-ping pointer-events-none"></div>
+                     )}
+                     
+                     {isProcessing && (
+                         <div className="absolute inset-[-6px] rounded-full border-2 border-amber-400/30 animate-pulse pointer-events-none"></div>
                      )}
                  </button>
             </div>

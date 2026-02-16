@@ -90,9 +90,11 @@ export class LiveClient {
   
   private callbacks: LiveClientCallbacks | null = null;
 
-  constructor() {
-    // API Key is strictly obtained from process.env.API_KEY
-    this.client = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  constructor(apiKey: string) {
+    if (!apiKey) {
+        throw new Error("LiveClient initialized without API Key");
+    }
+    this.client = new GoogleGenAI({ apiKey });
   }
 
   // --- REGION 1: ACCENT & VOICE LOGIC ---
@@ -106,14 +108,15 @@ export class LiveClient {
       const prefix1 = code.substring(0, 1);
 
       // 1. Deep / Authoritative Male Voices (Fenrir)
-      // Suitable for: Asia (Z, R, V), Russia (U), some Africa
-      if (['Z', 'R', 'V', 'U'].includes(prefix1)) {
+      // Suitable for: Mainland China (Z), SE Asia (V), Russia (U)
+      // EXCLUDED: Korea (RK) and Japan (RJ) to allow for lighter/clearer Asian accents using Charon
+      if (['Z', 'V', 'U'].includes(prefix1)) {
           return 'Fenrir';
       }
 
       // 2. Standard Deep Male (Charon)
-      // Suitable for: Middle East (O), Europe (E, L), South America (S)
-      if (['O', 'E', 'L', 'S', 'F', 'H', 'G', 'D'].includes(prefix1)) {
+      // Suitable for: Korea (RK), Japan (RJ), Middle East (O), Europe (E, L), South America (S)
+      if (prefix === 'RK' || prefix === 'RJ' || ['O', 'E', 'L', 'S', 'F', 'H', 'G', 'D'].includes(prefix1)) {
           return 'Charon';
       }
 
@@ -127,91 +130,133 @@ export class LiveClient {
       return 'Kore';
   }
 
-  private getAccentInstruction(airportCode: string, enabled: boolean): string {
-      if (!enabled || !airportCode || airportCode.length < 2) {
-          return "- **ACCENT**: Use Standard ICAO English / Generic US/UK Accent. Clear and Neutral.";
-      }
-
-      const code = airportCode.toUpperCase();
+  /**
+   * Generates the Voice Style, Speed, and Accent instruction based on Difficulty Level.
+   * This couples the "Regional Accent" logic with the "Training Difficulty".
+   */
+  private getAccentInstruction(airportCode: string, enabled: boolean, difficulty: string): string {
+      const code = airportCode ? airportCode.toUpperCase() : 'XXXX';
       const prefix = code.substring(0, 2);
       const prefix1 = code.substring(0, 1);
 
+      // 1. Determine Difficulty Parameters
+      let speedInstruction = "";
+      let clarityInstruction = "";
+      let accentIntensity = "";
+
+      if (difficulty.includes("Level 3")) {
+          // LEVEL 3-4 (Upgrade): Slow, Clear, Educational
+          speedInstruction = "**SPEAKING RATE**: SLOW (approx 90-100 WPM). Leave distinct pauses between instructions.";
+          clarityInstruction = "**ARTICULATION**: TEXTBOOK PERFECT. Enunciate every syllable clearly.";
+          accentIntensity = "NEUTRAL / STANDARD ICAO. Suppress regional accents for clarity.";
+      } else if (difficulty.includes("Recurrent")) {
+          // LEVEL 4 (Recurrent): Normal, Professional
+          speedInstruction = "**SPEAKING RATE**: NORMAL / STANDARD (approx 115-125 WPM).";
+          clarityInstruction = "**ARTICULATION**: Professional and clear.";
+          // UPDATED: Make accents more noticeable even at Level 4 if explicitly enabled
+          accentIntensity = enabled ? "DISTINCT REGIONAL ACCENT. Authentic but intelligible." : "STANDARD ICAO.";
+      } else if (difficulty.includes("Level 4 → 5")) {
+          // LEVEL 5 (Upgrade): Fast, Natural
+          speedInstruction = "**SPEAKING RATE**: FAST (approx 135-145 WPM). Efficient delivery.";
+          clarityInstruction = "**ARTICULATION**: Natural flow. Use standard contractions/reductions.";
+          accentIntensity = enabled ? "MODERATE-HEAVY REGIONAL ACCENT. Authentic local intonation." : "MILDLY BUSY TONE.";
+      } else {
+          // LEVEL 6 (Examiner): Very Fast, High Workload, Heavy Accent
+          speedInstruction = "**SPEAKING RATE**: VERY FAST / BUSY (150+ WPM). Rapid-fire delivery.";
+          clarityInstruction = "**ARTICULATION**: Clipped, hurried, 'Radio Voice'. Mimic high-workload fatigue.";
+          accentIntensity = "HEAVY / AUTHENTIC LOCAL ACCENT. Use local cadence. Challenge the pilot's ear.";
+      }
+
+      // 2. Generate Base Instruction
       const base = `
-!!! CRITICAL VOICE ACTING INSTRUCTION !!!
-ACT AS A LOCAL ATC CONTROLLER AT ${code}. IMPERSONATE THE ACCENT DESCRIBED BELOW.
-DO NOT speak like a generic AI robot. Be human, busy, and professional.
+### 🎙️ VOICE & PERSONA CONFIGURATION
+- **ROLE**: Busy ATC Controller at ${code}.
+- ${speedInstruction}
+- ${clarityInstruction}
+- **ACCENT INTENSITY**: ${accentIntensity}
 `;
+
+      // If accents are disabled OR difficulty is very low, return generic ICAO
+      // EXCEPTION: If user explicitly provided a non-standard ICAO code, we imply they might want context, but we respect the toggle mostly.
+      if ((!enabled && !difficulty.includes("Level 6")) || difficulty.includes("Level 3")) {
+          return `${base}\n- **STYLE**: Use Standard ICAO English. Neutral and clear.`;
+      }
+
+      // 3. Region Specific Instructions (Only if enabled or High Difficulty)
+      let regionSpecifics = "";
 
       // --- ASIA ---
       if (prefix1 === 'Z') { // China
-          return `${base}
+          regionSpecifics = `
 ### **🌏 REGION Z (China) - "Beijing/Shanghai Control"**
 * **Phonology**: /θ/ -> /s/ (Three -> Sree), /v/ -> /w/. Final consonants often swallowed.
-* **Prosody**: Staccato rhythm. High volume. Authoritative but slightly rigid.
-* **Lexical**: Strict use of "DAY-SEE-MAL", "Standby".
-* **Example**: "Air China 981, radar contact. Turn right heading 090. Descend now."`;
+* **Prosody**: Staccato rhythm. High volume. Authoritative.
+* **Lexical**: Strict "DAY-SEE-MAL", "Standby".`;
       }
-      if (prefix === 'RK') { // Korea
-          return `${base}
+      else if (prefix === 'RK') { // Korea
+          regionSpecifics = `
 ### **🌏 REGION RK (Korea) - "Incheon Control"**
-* **Phonology**: P/F merger (Frequency -> Prequency). R/L liquid sound.
-* **Prosody**: Syllable-timed. distinct high-low-high pitch at end of phrases.
-* **Example**: "Korean Air 85, change prequency one two one DAY-SEE-MAL pipe."`;
+* **ACTING**: You are a Korean ATC. Speak English with a distinct Korean accent.
+* **Phonology**: 
+  - SUBSTITUTE 'F' with 'P' strongly (e.g., "Frequency" -> "Prequency", "Four" -> "Pour").
+  - SUBSTITUTE 'R' and 'L' often.
+  - Short vowels (e.g., "Ready" -> "Red-dy").
+* **Prosody**: Syllable-timed. Distinct **rising intonation** at the end of phrases (high-low-high). 
+* **Style**: Formal, efficient, slightly hurried.`;
       }
-      if (prefix1 === 'V') { // India / SE Asia
-          return `${base}
+      else if (prefix1 === 'V') { // India / SE Asia
+          regionSpecifics = `
 ### **🌏 REGION V (India/Thailand) - "Mumbai/Bangkok Control"**
 * **Phonology**: Retroflex T/D (curled tongue). W/V merger.
-* **Prosody**: Musical/Sing-song rhythm. Very fast pace (130+ WPM).
-* **Lexical**: "Confirm" used often.
-* **Example**: "Vistara 202, confirm visual? Do one thing, descend level eight zero."`;
+* **Prosody**: Musical/Sing-song rhythm. Very fast pace.
+* **Lexical**: "Confirm" used often.`;
       }
-      if (prefix === 'RJ' || prefix === 'RO') { // Japan
-          return `${base}
+      else if (prefix === 'RJ' || prefix === 'RO') { // Japan
+          regionSpecifics = `
 ### **🌏 REGION RJ (Japan) - "Tokyo Control"**
-* **Phonology**: Katakana effect (Street -> Sutorito). R/L merger.
+* **Phonology**: Katakana effect (Street -> Sutorito). R/L merger. 
 * **Prosody**: Monotonic, flat rhythm, robot-like precision. Very polite.
-* **Example**: "All Nippon 5, rradar contact. Prease cimb and maintain."`;
+* **Pronunciation**: Add vowels to consonant clusters (e.g. "Golf" -> "Golu-fu").`;
       }
 
       // --- MIDDLE EAST & AFRICA ---
-      if (prefix1 === 'O' || ['HE', 'HA', 'DT', 'DA'].includes(prefix)) { // Middle East
-          return `${base}
+      else if (prefix1 === 'O' || ['HE', 'HA', 'DT', 'DA'].includes(prefix)) { // Middle East
+          regionSpecifics = `
 ### **🌏 REGION O/H (Middle East) - "Dubai/Cairo Control"**
 * **Phonology**: Guttural /h/ and /k/. P/B confusion (Parking -> Barking). Trilled R.
-* **Prosody**: Deep, resonant, deliberate pace.
-* **Lexical**: Formal address ("Captain").
-* **Example**: "Emirates 5, cleared to rand runway one two reft. Contact ground."`;
+* **Prosody**: Deep, resonant, deliberate pace.`;
       }
 
       // --- SOUTH AMERICA ---
-      if (prefix1 === 'S' || prefix1 === 'M') { // Latin America
-          return `${base}
+      else if (prefix1 === 'S' || prefix1 === 'M') { // Latin America
+          regionSpecifics = `
 ### **🌎 REGION S/M (Latin America) - "Bogota/Sao Paulo/Mexico"**
 * **Phonology**: Vowel insertion before S-clusters (Station -> E-station). H is silent.
-* **Prosody**: Rapid machine-gun rhythm. Spanish-influenced cadence.
-* **Example**: "Avianca 5, turn left, e-speed one eight zero. Contact e-tower."`;
+* **Prosody**: Rapid machine-gun rhythm. Spanish-influenced cadence.`;
       }
 
       // --- RUSSIA ---
-      if (prefix1 === 'U') { // Russia
-          return `${base}
+      else if (prefix1 === 'U') { // Russia
+          regionSpecifics = `
 ### **🌏 REGION U (Russia) - "Moscow Control"**
 * **Phonology**: No /th/ sound (Three -> Tree/Zree). Rolling R. Heavy articulation.
-* **Prosody**: Falling intonation. Serious, somber tone.
-* **Example**: "Aeroflot 101, descend level tree-zero-zero. Position check."`;
+* **Prosody**: Falling intonation. Serious, somber tone.`;
       }
 
       // --- EUROPE ---
-      if (prefix === 'LF') { // France
-          return `${base}
+      else if (prefix === 'LF') { // France
+          regionSpecifics = `
 ### **🌏 REGION E (France) - "Paris Control"**
 * **Phonology**: H-dropping ('Eading). Th -> Z (The -> Ze). Uvular R.
-* **Prosody**: Stress on last syllable.
-* **Example**: "Air France 44, turn left 'eading tree-six-zero. Descend."`;
+* **Prosody**: Stress on last syllable.`;
       }
       
-      return "- **ACCENT**: Use Standard ICAO English with a slight regional touch appropriate for the location.";
+      // If no specific region matched but accent is enabled/high difficulty
+      if (!regionSpecifics && (enabled || difficulty.includes("Level 6"))) {
+          regionSpecifics = `- **STYLE**: Use a slight regional touch appropriate for ${code}.`;
+      }
+
+      return `${base}\n${regionSpecifics}`;
   }
 
   async connect(
@@ -284,9 +329,10 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
         }
     }
 
-    // 2. Generate Voice & Accent Config
+    // 2. Generate Voice & Accent Config (Now Coupled with Difficulty)
     const voiceName = this.getVoiceName(airportCode, accentEnabled);
-    const accentPrompt = this.getAccentInstruction(airportCode, accentEnabled);
+    // PASS DIFFICULTY HERE
+    const accentPrompt = this.getAccentInstruction(airportCode, accentEnabled, difficulty);
 
     // 3. Language & Reporting Instruction
     const langInstruction = language === 'cn' 
@@ -441,8 +487,6 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
                 return; // Drop data
             }
 
-            // REVERTED VAD OPTIMIZATION: Send data continuously if not muted
-            // This ensures no speech is cut off due to aggressive silence detection thresholds
             this.sendRealtimeInput(inputData);
         };
 
@@ -491,17 +535,14 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
   }
 
   async startRecording() {
-      // Clear suspension timer if active
       if (this.suspendTimer) {
           clearTimeout(this.suspendTimer);
           this.suspendTimer = null;
       }
 
-      // Resume AudioContext if suspended (Power Saving)
       if (this.inputAudioContext && this.inputAudioContext.state === 'suspended') {
           try {
               await this.inputAudioContext.resume();
-              console.log("AudioContext Resumed");
           } catch (e) {
               console.warn("Failed to resume input context:", e);
           }
@@ -522,19 +563,16 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
           this.setInputMuted(true);
       }
 
-      // Schedule AudioContext suspension to save CPU/Battery
       if (this.inputAudioContext && this.inputAudioContext.state === 'running') {
           this.suspendTimer = setTimeout(async () => {
-              // Double check status before suspending
               if (!this.isRecording && this.inputAudioContext?.state === 'running') {
                   try {
                       await this.inputAudioContext.suspend();
-                      console.log("AudioContext Suspended (Power Saving)");
                   } catch (e) {
                       console.warn("Failed to suspend input context:", e);
                   }
               }
-          }, 5000); // Suspend after 5 seconds of silence
+          }, 5000); 
       }
   }
 
