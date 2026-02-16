@@ -1,7 +1,8 @@
 
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from "@google/genai";
-import { Scenario } from "../types";
+import { Scenario, AppLanguage } from "../types";
 import { createPcmBlob, decodeAudioData, normalizeAudio } from "./audioUtils";
+import { airportService } from "./airportService";
 
 interface LiveClientCallbacks {
   onOpen: () => void;
@@ -218,7 +219,8 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
     accentEnabled: boolean,
     cockpitNoise: boolean,
     coachingInstruction: string,
-    dynamicRules: string
+    dynamicRules: string,
+    language: AppLanguage = 'cn'
   ) {
     this.callbacks = callbacks;
 
@@ -228,11 +230,76 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
     this.outputNode = this.outputAudioContext.createGain();
     this.outputNode.connect(this.outputAudioContext.destination);
 
-    // 1. Generate Voice & Accent Config
+    // 1. Fetch Dynamic Airport Data for Adaptation
+    let airportContext = "";
+    if (airportCode && airportCode.length >= 3) {
+        try {
+            const airport = await airportService.getAirportByCode(airportCode);
+            if (airport) {
+                // Construct a rich context block for the AI
+                const rwList = airport.runways ? airport.runways.join(', ') : 'Standard';
+                
+                // Format Frequencies for AI Prompt
+                let freqList = "";
+                if (airport.frequencies) {
+                    freqList = Object.entries(airport.frequencies)
+                        .map(([k, v]) => `- ${k}: ${v} MHz`)
+                        .join('\n');
+                } else {
+                    freqList = "- TOWER: 118.100 MHz\n- GROUND: 121.900 MHz\n- APP: 119.700 MHz";
+                }
+
+                // Format Procedures
+                let procList = "Standard Procedures";
+                if (airport.procedures) {
+                    const sids = airport.procedures.sids ? `SIDs: ${airport.procedures.sids.join(', ')}` : '';
+                    const stars = airport.procedures.stars ? `STARs: ${airport.procedures.stars.join(', ')}` : '';
+                    procList = `${sids}\n${stars}`;
+                }
+                
+                airportContext = `
+    ### 🏟️ ACTIVE AIRPORT ENVIRONMENT: ${airport.name} (${airport.icao_code})
+    - Elevation: ${airport.elevation_ft}ft
+    - Runways: ${rwList}
+    
+    ### 📡 ACTIVE FREQUENCIES (ROLEPLAY THESE UNITS):
+    ${freqList}
+    
+    ### 🛫 PROCEDURES:
+    ${procList}
+    
+    ⚠️ **SCENARIO ADAPTATION REQUIRED**:
+    The scenario details provided may use generic or incorrect runway/taxiway designators (e.g. "36R", "Alpha").
+    YOU MUST ADAPT the scenario to use REAL runways and taxiways from the ${airport.icao_code} data above.
+    Example: If scenario says "Taxi to 36R" but ${airport.icao_code} only has "09/27", clear the pilot to "Runway 27" instead.
+    MAINTAIN THE CORE CONFLICT (e.g. Incursion, Fire) but place it in the correct GEOMETRY.
+    USE CORRECT UNIT NAMES (e.g., "${airport.city} Tower" instead of "Tower").
+    `;
+            }
+        } catch (e) {
+            console.warn("LiveClient: Failed to load airport data for context injection", e);
+        }
+    }
+
+    // 2. Generate Voice & Accent Config
     const voiceName = this.getVoiceName(airportCode, accentEnabled);
     const accentPrompt = this.getAccentInstruction(airportCode, accentEnabled);
 
-    // 2. Build System Instruction
+    // 3. Language & Reporting Instruction
+    const langInstruction = language === 'cn' 
+        ? `
+        *** REPORTING LANGUAGE CONFIGURATION (IMPORTANT) ***
+        When calling 'reportAssessment' tool, YOU MUST:
+        1. Write the 'assessment', 'safetyMargin', 'frictionPoints', 'theory', 'rootCause', and 'explanation' fields in SIMPLIFIED CHINESE (简体中文).
+        2. KEEP any direct quotes, transcripts, or specific aviation phraseology examples in ENGLISH.
+        3. The goal is to explain the concepts to a Chinese speaker, but show the English mistakes clearly.
+        `
+        : `
+        *** REPORTING LANGUAGE CONFIGURATION ***
+        All content in 'reportAssessment' MUST be in ENGLISH.
+        `;
+
+    // 4. Build System Instruction with all contexts
     const systemInstruction = `
     ${coachingInstruction}
     
@@ -240,10 +307,15 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
     - Current Difficulty: ${difficulty}
     - Airport: ${airportCode}
     - Cockpit Noise Sim: ${cockpitNoise ? "ENABLED" : "DISABLED"}
+    - App Language: ${language === 'cn' ? 'Chinese' : 'English'}
     
+    ${airportContext}
+
     ${accentPrompt}
 
     ${dynamicRules}
+
+    ${langInstruction}
     `;
 
     // Local accumulation for transcripts

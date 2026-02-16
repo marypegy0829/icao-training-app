@@ -1,11 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { LiveClient } from '../services/liveClient';
-import { SCENARIO_CATEGORIES, ScenarioCategory } from '../services/trainingData';
+import { SCENARIO_CATEGORIES, ScenarioCategory, PHASE_LOGIC_CONFIG, TrainingTag } from '../services/trainingData';
 import { scenarioService } from '../services/scenarioService';
 import { airportService, Airport } from '../services/airportService';
 import { ruleService } from '../services/ruleService';
-import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, FlightPhase, DifficultyLevel } from '../types';
+import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, FlightPhase, DifficultyLevel, AppLanguage } from '../types';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
 import Transcript from '../components/Transcript';
@@ -30,6 +30,7 @@ interface TrainingScreenProps {
     difficulty: DifficultyLevel;
     accentEnabled: boolean;
     cockpitNoise: boolean; 
+    language: AppLanguage;
 }
 
 const TrainingScreen: React.FC<TrainingScreenProps> = ({ 
@@ -37,7 +38,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     onConsumeScenario, 
     difficulty, 
     accentEnabled, 
-    cockpitNoise 
+    cockpitNoise,
+    language 
 }) => {
   // Navigation State
   const [view, setView] = useState<'dashboard' | 'session'>('dashboard');
@@ -45,7 +47,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   // Selection State
   const [selectedPhase, setSelectedPhase] = useState<FlightPhase | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ScenarioCategory | null>(null);
+  const [selectedTag, setSelectedTag] = useState<TrainingTag | null>(null); // New Tag Filter
   const [airportCode, setAirportCode] = useState<string>('');
+  const [activeAirport, setActiveAirport] = useState<Airport | null>(null); // Full Airport Object
   
   // Airport Search State
   const [searchResults, setSearchResults] = useState<Airport[]>([]);
@@ -59,6 +63,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   // Session State
   const [activeScenario, setActiveScenario] = useState<Scenario | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
+  const [isPaused, setIsPaused] = useState(false); // NEW: Pause State
   
   // Track status in ref to avoid closure staleness
   const statusRef = useRef<ConnectionStatus>(status);
@@ -99,16 +104,29 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     };
   }, []);
 
-  // Handle Airport Search
+  // Handle Airport Search & Sync
   useEffect(() => {
       const delayDebounce = setTimeout(async () => {
           if (airportCode.length >= 2) {
              const results = await airportService.searchAirports(airportCode);
              setSearchResults(results);
              setShowResults(true);
+             
+             // Auto-select if exact match 4-letter ICAO
+             if (airportCode.length === 4) {
+                 const exact = results.find(a => a.icao_code === airportCode.toUpperCase());
+                 if (exact) {
+                     setActiveAirport(exact);
+                 } else {
+                     // Try direct fetch if search didn't return (edge case)
+                     const direct = await airportService.getAirportByCode(airportCode);
+                     setActiveAirport(direct);
+                 }
+             }
           } else {
              setSearchResults([]);
              setShowResults(false);
+             if (airportCode.length === 0) setActiveAirport(null);
           }
       }, 300);
       return () => clearTimeout(delayDebounce);
@@ -149,6 +167,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   // --- Auto-Close on Inactivity Logic ---
   useEffect(() => {
       if (status !== ConnectionStatus.CONNECTED) return;
+      if (isPaused) return; // FIX: Do not auto-close if manually paused
 
       const checkInterval = setInterval(() => {
           const timeSinceLastInput = Date.now() - lastInputTimeRef.current;
@@ -160,10 +179,27 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
       }, 5000); // Check every 5 seconds
 
       return () => clearInterval(checkInterval);
-  }, [status]);
+  }, [status, isPaused]); // Added isPaused dependency
 
 
   // --- Actions ---
+
+  const selectAirport = (apt: Airport) => {
+      setAirportCode(apt.icao_code);
+      setActiveAirport(apt);
+      setShowResults(false);
+  };
+
+  const togglePause = () => {
+      if (status !== ConnectionStatus.CONNECTED) return;
+      
+      const newState = !isPaused;
+      setIsPaused(newState);
+      
+      if (liveClientRef.current) {
+          liveClientRef.current.setInputMuted(newState);
+      }
+  };
 
   // FIX: Accept scenario explicitly to avoid closure state traps
   const saveToSupabase = async (finalAssessment: AssessmentData | null, targetScenario: Scenario | null) => {
@@ -212,6 +248,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     setActiveScenario(scenario);
     setView('session');
     setStatus(ConnectionStatus.CONNECTING);
+    setIsPaused(false); // Reset Pause State
+    
     // Don't clear messages on reconnect if it's a resume-like action
     if (status !== ConnectionStatus.ERROR) {
        setMessages([]);
@@ -265,7 +303,10 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
        - Provide a "Quick Assessment" in the report. Be concise but cover all 6 points.
     `;
 
-    // Pass difficulty, airport, accent, NOISE, and RULES
+    // Turn Separation Logic Flag
+    let isAiTurnStart = true;
+
+    // Pass difficulty, airport, accent, NOISE, RULES and LANGUAGE
     await liveClientRef.current.connect(scenario, {
       onOpen: () => {
           setStatus(ConnectionStatus.CONNECTED);
@@ -292,39 +333,49 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
               lastInputTimeRef.current = Date.now();
           }
       },
-      onTurnComplete: () => setAudioLevel(0),
+      onTurnComplete: () => {
+          setAudioLevel(0);
+          // End of turn: Next AI speech should be a new paragraph
+          isAiTurnStart = true;
+      },
       onTranscript: (text, role, isPartial) => {
           // Reset inactivity timer on user interaction
           if (role === 'user') {
               lastInputTimeRef.current = Date.now();
+              isAiTurnStart = true; // User spoke, so next AI response is new turn
+              return; // Do not display user messages in transcript
           }
 
-          setMessages(prev => {
-            const lastMsg = prev[prev.length - 1];
-            // Check for Coach Hint prefix
-            const isHint = role === 'ai' && text.includes("💡 COACH:");
-            
-            if (role === 'user') {
-                if (lastMsg && lastMsg.role === 'user' && lastMsg.isPartial) {
-                    const newMsgs = [...prev];
-                    newMsgs[newMsgs.length - 1] = { ...lastMsg, text, isPartial };
-                    if (!isPartial && !text) return prev;
-                    return newMsgs;
-                } else if (text) {
-                    return [...prev, { id: Date.now().toString(), role, text, isPartial }];
-                }
-            }
-            if (role === 'ai') {
-                if (lastMsg && lastMsg.role === 'ai') {
-                    const newMsgs = [...prev];
-                    newMsgs[newMsgs.length - 1] = { ...lastMsg, text: lastMsg.text + text };
-                    return newMsgs;
-                } else {
+          if (role === 'ai') {
+              // Determine if we should start a new message (bubble) or append to the last one
+              const shouldCreateNew = isAiTurnStart;
+              
+              // If we are starting a new message, flip the flag immediately so subsequent chunks append
+              if (shouldCreateNew) {
+                  isAiTurnStart = false;
+              }
+
+              setMessages(prev => {
+                const lastMsg = prev[prev.length - 1];
+                // Check for Coach Hint prefix
+                const isHint = text.includes("💡 COACH:");
+                
+                if (shouldCreateNew) {
+                    // Create NEW bubble
                     return [...prev, { id: Date.now().toString(), role, text, isHint }];
+                } else {
+                    // APPEND to existing AI bubble
+                    if (lastMsg && lastMsg.role === 'ai') {
+                        const newMsgs = [...prev];
+                        newMsgs[newMsgs.length - 1] = { ...lastMsg, text: lastMsg.text + text };
+                        return newMsgs;
+                    } else {
+                        // Fallback (e.g. initial message)
+                        return [...prev, { id: Date.now().toString(), role, text, isHint }];
+                    }
                 }
-            }
-            return prev;
-          });
+              });
+          }
       },
       onAssessment: (data) => {
           setAssessment(data);
@@ -333,7 +384,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           setStatus(ConnectionStatus.DISCONNECTED);
           liveClientRef.current?.disconnect();
       }
-    }, difficulty, airportCode, accentEnabled, cockpitNoise, coachingInstruction, dynamicRules);
+    }, difficulty, airportCode, accentEnabled, cockpitNoise, coachingInstruction, dynamicRules, language);
   };
 
   const handleStop = async (dueToInactivity = false) => {
@@ -341,6 +392,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           alert("检测到长时间未发言，训练已自动结束。\nSession ended due to inactivity (2 mins).");
       }
 
+      // If just paused, unmute first? Doesn't matter for finalize.
+      
       if (liveClientRef.current && status === ConnectionStatus.CONNECTED) {
           setStatus(ConnectionStatus.ANALYZING);
           await liveClientRef.current.finalize();
@@ -356,20 +409,64 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   const requestHint = () => {
       if (status === ConnectionStatus.CONNECTED) {
           liveClientRef.current?.sendText("REQUEST_HINT");
-          // Add explicit hint message to transcript for visual feedback
-          setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: '💡 Hint Requested...' }]);
+          // Do not add hint message to transcript as per "No User Text" rule
           lastInputTimeRef.current = Date.now(); // Reset timer on hint request
       }
+  };
+
+  // Translation Labels
+  const t = {
+      title: language === 'cn' ? '专项训练' : 'Scenario Training',
+      subtext: language === 'cn' ? '针对性强化飞行特情通话能力' : 'Targeted Flight Scenario Practice',
+      history: language === 'cn' ? '历史' : 'History',
+      recLabel: language === 'cn' ? '推荐训练' : 'Recommended',
+      startRec: language === 'cn' ? '开始练习' : 'Start Practice',
+      airportPlace: language === 'cn' ? '机场代码 (例如 ZBAA)' : 'Airport Code (e.g. ZBAA)',
+      flightPhase: language === 'cn' ? '飞行阶段 (Flight Phase)' : 'Flight Phase',
+      allPhases: language === 'cn' ? '全部阶段 (All Phases)' : 'All Phases',
+      applicableFailures: language === 'cn' ? '可选故障 (Applicable Failures)' : 'Applicable Failures',
+      category: language === 'cn' ? '分类 (Category)' : 'Category',
+      noScenario: language === 'cn' ? '没有找到匹配的场景。' : 'No matching scenarios found.',
+      finish: language === 'cn' ? '结束训练' : 'Finish',
+      pause: language === 'cn' ? '暂停' : 'Pause',
+      resume: language === 'cn' ? '继续' : 'Resume',
+      stop: language === 'cn' ? '停止' : 'Stop',
+      brief: language === 'cn' ? '情景简报' : 'Situation Brief',
+      liveTranscript: language === 'cn' ? '实时对话' : 'Live Transcript (ATC Only)',
+      aiHint: language === 'cn' ? 'AI 提示' : 'AI Hint',
+      generating: language === 'cn' ? '正在生成反馈' : 'Generating Feedback',
+      analyzing: language === 'cn' ? '教员正在分析你的表现...' : 'Analyzing performance...',
+      connectFail: language === 'cn' ? '连接失败' : 'Connection Failed',
+      returnHome: language === 'cn' ? '返回主页' : 'Return Home',
+      resumeSession: language === 'cn' ? '恢复会话' : 'Resume Session',
+      openMic: language === 'cn' ? '麦克风已开启 - 2分钟无声自动结束' : 'Open Mic Active - Auto Close in 2m inactive',
+      pausedText: language === 'cn' ? '已暂停 - 点击继续恢复训练' : 'PAUSED - Click Resume to continue',
+      connecting: language === 'cn' ? '连接中...' : 'Connecting...'
   };
 
   // --- Renders ---
 
   const renderDashboard = () => {
-      // Filter Scenarios
+      // 1. Get Valid Tags for the Selected Phase (Anti-Error Logic)
+      const validTagsForPhase = selectedPhase ? PHASE_LOGIC_CONFIG[selectedPhase] : null;
+
+      // 2. Filter Scenarios
       const filteredScenarios = scenarios.filter(s => {
-          const matchCategory = selectedCategory ? s.category === selectedCategory : true;
+          // Phase Filter
           const matchPhase = selectedPhase ? s.phase === selectedPhase : true;
-          return matchCategory && matchPhase;
+          
+          // Tag/Category Filter
+          // If a specific tag is selected, check if scenario tags include it
+          let matchTag = true;
+          if (selectedTag) {
+              const sTags = (s as any).tags as TrainingTag[];
+              matchTag = sTags ? sTags.includes(selectedTag) : false;
+          } else if (selectedCategory) {
+              // Fallback to category if no specific tag selected (legacy)
+              matchTag = s.category === selectedCategory;
+          }
+
+          return matchPhase && matchTag;
       });
 
       // Helper to color code difficulty
@@ -390,9 +487,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
               <div className="pt-12 pb-4 px-6 bg-white/80 backdrop-blur-md sticky top-0 z-10 border-b border-ios-border flex flex-col space-y-4">
                   <div className="flex justify-between items-center">
                       <div>
-                          <h1 className="text-2xl font-bold text-ios-text">专项训练</h1>
+                          <h1 className="text-2xl font-bold text-ios-text">{t.title}</h1>
                           <div className="flex items-center space-x-2 mt-1">
-                              <p className="text-sm text-ios-subtext">针对性强化飞行特情通话能力</p>
+                              <p className="text-sm text-ios-subtext">{t.subtext}</p>
                               <div className="text-[10px] font-bold text-ios-blue bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase">
                                 Mode: {difficulty}
                               </div>
@@ -405,7 +502,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                          </svg>
-                         <span className="text-sm font-bold">历史</span>
+                         <span className="text-sm font-bold">{t.history}</span>
                       </button>
                   </div>
               </div>
@@ -415,7 +512,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                   <div className="bg-gradient-to-r from-ios-indigo to-purple-600 rounded-2xl p-5 text-white shadow-lg relative overflow-hidden">
                       <div className="relative z-10">
                           <div className="flex items-center space-x-2 mb-2">
-                              <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold uppercase tracking-wider">推荐训练</span>
+                              <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold uppercase tracking-wider">{t.recLabel}</span>
                               <span className="text-xs opacity-80">Phase: Ground Ops</span>
                           </div>
                           <h3 className="text-xl font-bold mb-1">Complex Taxi Instructions</h3>
@@ -424,7 +521,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                              onClick={() => startTraining(scenarios.find(s => s.id === 'taxi_giveway' || s.id === 'gnd_02') || scenarios[0])}
                              className="px-4 py-2 bg-white text-ios-indigo text-sm font-bold rounded-full shadow-sm hover:scale-105 transition-transform"
                           >
-                              开始练习
+                              {t.startRec}
                           </button>
                       </div>
                       <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl transform translate-x-10 -translate-y-10"></div>
@@ -443,7 +540,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                      </div>
                      <input 
                         type="text" 
-                        placeholder="机场代码 (例如 ZBAA)" 
+                        placeholder={t.airportPlace}
                         className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 focus:bg-white focus:border-ios-blue focus:ring-0 rounded-xl text-sm font-mono font-bold uppercase transition-colors shadow-sm relative z-0"
                         value={airportCode}
                         onChange={(e) => {
@@ -464,10 +561,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                             {searchResults.map((apt) => (
                                 <button
                                     key={apt.id}
-                                    onClick={() => {
-                                        setAirportCode(apt.icao_code);
-                                        setShowResults(false);
-                                    }}
+                                    onClick={() => selectAirport(apt)}
                                     className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center justify-between border-b border-gray-50 last:border-0"
                                 >
                                     <div>
@@ -484,39 +578,70 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                      )}
                   </div>
 
-                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3">飞行阶段 (Flight Phase)</h3>
+                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3">{t.flightPhase}</h3>
                   
-                  {/* Phase Selector */}
-                  <div className="flex space-x-2 overflow-x-auto pb-2 no-scrollbar">
+                  {/* Phase Selector - UPDATED to Grid Layout for Mobile View */}
+                  <div className="grid grid-cols-2 gap-2 mb-2">
                       <button 
-                        onClick={() => setSelectedPhase(null)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${!selectedPhase ? 'bg-ios-text text-white' : 'bg-white text-ios-subtext border border-gray-200'}`}
+                        onClick={() => {
+                            setSelectedPhase(null);
+                            setSelectedTag(null);
+                        }}
+                        className={`col-span-2 py-2 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                            !selectedPhase 
+                            ? 'bg-ios-text text-white ring-2 ring-ios-text ring-offset-1' 
+                            : 'bg-white text-ios-subtext border border-gray-200 hover:bg-gray-50'
+                        }`}
                       >
-                          全部阶段
+                          {t.allPhases}
                       </button>
                       {PHASES.map(phase => (
                           <button 
                             key={phase}
-                            onClick={() => setSelectedPhase(phase)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${selectedPhase === phase ? 'bg-ios-text text-white' : 'bg-white text-ios-subtext border border-gray-200'}`}
+                            onClick={() => {
+                                setSelectedPhase(phase);
+                                setSelectedTag(null);
+                            }}
+                            className={`py-2 px-2 rounded-xl text-xs font-bold transition-all shadow-sm truncate ${
+                                selectedPhase === phase 
+                                ? 'bg-ios-blue text-white ring-2 ring-ios-blue ring-offset-1' 
+                                : 'bg-white text-ios-subtext border border-gray-200 hover:bg-gray-50'
+                            }`}
                           >
                               {phase}
                           </button>
                       ))}
                   </div>
 
-                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mt-4 mb-3">分类 (Category)</h3>
-                  {/* Category Selector */}
+                  <h3 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mt-4 mb-3">
+                      {selectedPhase ? t.applicableFailures : t.category}
+                  </h3>
+                  
+                  {/* Category/Tag Selector - Dynamic based on Phase Logic */}
                   <div className="flex flex-wrap gap-2">
-                      {SCENARIO_CATEGORIES.map(cat => (
-                          <button
-                            key={cat}
-                            onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${selectedCategory === cat ? 'bg-ios-blue/10 text-ios-blue border-ios-blue' : 'bg-white text-ios-text border-gray-200'}`}
-                          >
-                              {cat}
-                          </button>
-                      ))}
+                      {selectedPhase && validTagsForPhase ? (
+                          // Show granular tags if Phase is selected (Anti-Error Logic)
+                          validTagsForPhase.map(tag => (
+                              <button
+                                key={tag}
+                                onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${selectedTag === tag ? 'bg-red-50 text-red-600 border-red-200' : 'bg-white text-ios-text border-gray-200'}`}
+                              >
+                                  {tag}
+                              </button>
+                          ))
+                      ) : (
+                          // Fallback to broad categories if no phase selected
+                          SCENARIO_CATEGORIES.map(cat => (
+                              <button
+                                key={cat}
+                                onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${selectedCategory === cat ? 'bg-ios-blue/10 text-ios-blue border-ios-blue' : 'bg-white text-ios-text border-gray-200'}`}
+                              >
+                                  {cat}
+                              </button>
+                          ))
+                      )}
                   </div>
               </div>
 
@@ -525,7 +650,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                   {loadingScenarios ? (
                       <div className="text-center py-10 text-gray-400 text-sm animate-pulse">Loading Scenarios...</div>
                   ) : filteredScenarios.length === 0 ? (
-                      <div className="text-center py-10 text-ios-subtext text-sm">没有找到匹配的场景。</div>
+                      <div className="text-center py-10 text-ios-subtext text-sm">
+                          {selectedTag ? `当前阶段没有关于 ${selectedTag} 的场景。` : t.noScenario}
+                      </div>
                   ) : (
                       filteredScenarios.map(scenario => (
                           <button 
@@ -535,11 +662,20 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                           >
                               <div className="flex justify-between items-start mb-1">
                                   <div className="flex items-center space-x-2">
+                                      {/* Primary Category Badge */}
                                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase
                                           ${scenario.category === 'Operational & Weather' ? 'bg-green-100 text-green-700' : 'bg-ios-blue/5 text-ios-blue'}
                                       `}>
                                           {scenario.category === 'Operational & Weather' ? 'OPS & WX' : scenario.category}
                                       </span>
+                                      
+                                      {/* Show first Tag if available */}
+                                      {(scenario as any).tags && (scenario as any).tags.length > 0 && (
+                                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-red-50 text-red-600 border border-red-100">
+                                              {(scenario as any).tags[0]}
+                                          </span>
+                                      )}
+
                                       {scenario.difficulty_level && (
                                           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${getDifficultyColor(scenario.difficulty_level)}`}>
                                               {scenario.difficulty_level}
@@ -578,56 +714,78 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
         {status === ConnectionStatus.ANALYZING && (
           <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white animate-fade-in">
               <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin mb-6"></div>
-              <h2 className="text-2xl font-bold mb-2">正在生成反馈</h2>
-              <p className="text-white/80 text-center max-w-xs">教员正在分析你的表现...</p>
+              <h2 className="text-2xl font-bold mb-2">{t.generating}</h2>
+              <p className="text-white/80 text-center max-w-xs">{t.analyzing}</p>
           </div>
         )}
 
         {/* Error Overlay */}
         {status === ConnectionStatus.ERROR && errorMsg && (
             <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
-                <h3 className="text-ios-text font-bold text-lg mb-2">连接失败</h3>
+                <h3 className="text-ios-text font-bold text-lg mb-2">{t.connectFail}</h3>
                 <p className="text-ios-subtext text-sm mb-6 max-w-xs">{errorMsg}</p>
                 <div className="flex space-x-3">
                 <button 
                     onClick={() => setView('dashboard')}
                     className="px-6 py-2 bg-gray-200 text-gray-700 rounded-full text-sm font-semibold hover:bg-gray-300 transition-all"
                 >
-                    返回主页
+                    {t.returnHome}
                 </button>
                 <button 
                     onClick={handleReconnect}
                     className="px-6 py-2 bg-ios-red text-white rounded-full text-sm font-semibold shadow-lg hover:shadow-ios-red/30 transition-all"
                 >
-                    恢复会话
+                    {t.resumeSession}
                 </button>
                 </div>
             </div>
         )}
         
-        {/* Header - Fixed Height */}
-        <div className="pt-12 px-6 pb-2 flex justify-between items-center z-10 shrink-0 h-24">
-            <div className="flex items-center space-x-3 max-w-[70%]">
+        {/* Header - Fixed Height with increased Top Padding for layout adjustment */}
+        <div className="pt-14 px-6 pb-2 flex justify-between items-center z-10 shrink-0 h-24">
+            <div className="flex items-center space-x-3 max-w-[55%]">
                 {/* Status Indicator */}
                 <div className="flex items-center space-x-2 bg-white/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/60 shadow-sm shrink-0">
-                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                    <span className="text-[10px] font-bold text-green-600 uppercase tracking-widest">LIVE TRAINING</span>
+                    <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-green-500 animate-pulse'}`}></div>
+                    <span className="text-[10px] font-bold text-gray-700 uppercase tracking-widest truncate">
+                        {isPaused ? 'PAUSED' : 'LIVE'}
+                    </span>
                 </div>
                 {/* Scenario Title */}
                 <h1 className="text-sm font-bold text-ios-text truncate opacity-80 hidden sm:block">{activeScenario?.title}</h1>
             </div>
             
-            {/* Finish Button - Top Right */}
-            <button 
-                onClick={() => handleStop()}
-                disabled={status === ConnectionStatus.ANALYZING}
-                className="bg-white/80 backdrop-blur-md text-ios-blue border border-blue-100 px-4 py-2 rounded-full text-xs font-bold shadow-sm hover:bg-blue-50 active:scale-95 transition-all flex items-center space-x-1"
-            >
-                <span className="uppercase tracking-wide">Finish Training</span>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-            </button>
+            {/* Control Buttons - Top Right */}
+            <div className="flex items-center space-x-2">
+                <button 
+                    onClick={togglePause}
+                    disabled={status !== ConnectionStatus.CONNECTED}
+                    className={`
+                        flex items-center space-x-1 px-3 py-2 rounded-full text-xs font-bold shadow-sm transition-all
+                        ${isPaused 
+                            ? 'bg-yellow-100 text-yellow-700 border border-yellow-200 hover:bg-yellow-200' 
+                            : 'bg-white/80 backdrop-blur-md text-gray-600 border border-gray-200 hover:bg-gray-100'}
+                    `}
+                >
+                    {isPaused ? (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    )}
+                    <span className="uppercase tracking-wide hidden sm:inline">{isPaused ? t.resume : t.pause}</span>
+                </button>
+
+                <button 
+                    onClick={() => handleStop()}
+                    disabled={status === ConnectionStatus.ANALYZING}
+                    className="bg-white/80 backdrop-blur-md text-ios-red border border-red-100 px-3 py-2 rounded-full text-xs font-bold shadow-sm hover:bg-red-50 active:scale-95 transition-all flex items-center space-x-1"
+                >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9h6v6H9z" />
+                    </svg>
+                    <span className="uppercase tracking-wide hidden sm:inline">{t.stop}</span>
+                </button>
+            </div>
         </div>
 
         {/* Main Layout Container - Takes remaining height, Absolute Positioning for robustness */}
@@ -638,12 +796,18 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                 {/* Visualizer (Takes available space in this section) */}
                 <div className="flex-1 w-full flex items-center justify-center overflow-visible min-h-0 relative">
                     <div className="scale-[0.8] transform transition-transform">
-                        <Visualizer isActive={status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING} audioLevel={audioLevel} />
+                        {/* Pause state passed to visualizer to freeze animation */}
+                        <Visualizer isActive={(status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING) && !isPaused} audioLevel={audioLevel} />
                     </div>
                 </div>
                 {/* Cockpit - Fixed Height Container to prevent wobble */}
                 <div className="w-full shrink-0 h-28 sm:h-32">
-                    <CockpitDisplay active={status === ConnectionStatus.CONNECTED} scenario={activeScenario} airportCode={airportCode} />
+                    <CockpitDisplay 
+                        active={status === ConnectionStatus.CONNECTED && !isPaused} 
+                        scenario={activeScenario} 
+                        airportCode={airportCode}
+                        airportData={activeAirport} // PASS FULL AIRPORT DATA
+                    />
                 </div>
             </div>
 
@@ -660,7 +824,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                             </div>
-                            <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest">Situation Brief</span>
+                            <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest">{t.brief}</span>
                         </div>
                         <div className="max-h-[60px] overflow-y-auto custom-scrollbar">
                             <p className="text-sm text-gray-700 leading-relaxed font-medium text-justify">
@@ -679,18 +843,18 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                                     </svg>
                                 </div>
-                                <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest">Live Transcript</span>
+                                <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest">{t.liveTranscript}</span>
                             </div>
                             
                             {/* Hint Button */}
                             <button 
                                 onClick={requestHint}
-                                disabled={status !== ConnectionStatus.CONNECTED}
+                                disabled={status !== ConnectionStatus.CONNECTED || isPaused}
                                 className="flex items-center space-x-1 px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded-lg transition-colors disabled:opacity-50"
                                 title="Request Standard Phraseology Hint"
                             >
                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                                <span className="text-[10px] font-bold uppercase">AI Hint</span>
+                                <span className="text-[10px] font-bold uppercase">{t.aiHint}</span>
                             </button>
                         </div>
 
@@ -703,8 +867,10 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                     {/* C. STATUS BAR (Fixed Bottom of Card) */}
                     <div className="px-6 py-2 bg-white/50 border-t border-white/50 text-center shrink-0">
                         <span className="text-[9px] font-bold text-gray-400 animate-pulse uppercase tracking-wider flex items-center justify-center">
-                            <span className={`w-1.5 h-1.5 rounded-full mr-2 ${status === ConnectionStatus.CONNECTED ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
-                            {status === ConnectionStatus.CONNECTED ? "Open Mic Active - Auto Close in 2m inactive" : "Connecting..."}
+                            <span className={`w-1.5 h-1.5 rounded-full mr-2 ${status === ConnectionStatus.CONNECTED && !isPaused ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
+                            {status === ConnectionStatus.CONNECTED 
+                                ? (isPaused ? t.pausedText : t.openMic) 
+                                : t.connecting}
                         </span>
                     </div>
                 </div>
@@ -727,6 +893,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
               // CRITICAL: Only when user closes the report, we go back to dashboard.
               setView('dashboard');
           }} 
+          language={language}
         />
       )}
 

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { DifficultyLevel, AssessmentData } from '../types';
+import { DifficultyLevel, AssessmentData, AppLanguage } from '../types';
 import { userService, UserProfile } from '../services/userService';
 import { authService } from '../services/authService';
 import { achievementService, Achievement } from '../services/achievementService';
@@ -16,6 +16,8 @@ interface ProfileScreenProps {
   setAccentEnabled: (enabled: boolean) => void;
   cockpitNoise: boolean;
   setCockpitNoise: (enabled: boolean) => void;
+  language: AppLanguage;
+  setLanguage: (lang: AppLanguage) => void;
 }
 
 const ProfileScreen: React.FC<ProfileScreenProps> = ({ 
@@ -24,7 +26,9 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
     accentEnabled, 
     setAccentEnabled,
     cockpitNoise,
-    setCockpitNoise
+    setCockpitNoise,
+    language,
+    setLanguage
 }) => {
   // Real Data State
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -140,6 +144,20 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const unlockedAchievements = achievements.filter(a => a.unlocked_at).length;
   const pendingMistakes = mistakes.filter(m => !m.is_mastered).length;
 
+  // Localization Helpers
+  const t = {
+      dashboard: language === 'cn' ? 'My Dashboard' : 'My Dashboard',
+      achievements: language === 'cn' ? '勋章墙' : 'Badges',
+      mistakes: language === 'cn' ? '错题本' : 'Mistakes',
+      logs: language === 'cn' ? '飞行日志' : 'Logbook',
+      settings: language === 'cn' ? 'Settings' : 'Settings',
+      difficulty: language === 'cn' ? '训练难度 (Difficulty)' : 'Training Difficulty',
+      accent: language === 'cn' ? '区域口音 (Accent)' : 'Regional Accent',
+      noise: language === 'cn' ? '驾驶舱噪音 (Sim)' : 'Cockpit Noise (Sim)',
+      language: language === 'cn' ? '语言 (Language)' : 'App Language',
+      logout: language === 'cn' ? '退出登录' : 'Log Out'
+  };
+
   return (
     <div className="h-full w-full bg-ios-bg overflow-y-auto pb-24 font-sans text-ios-text">
       
@@ -198,7 +216,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
       {/* 2. Feature Cards (Horizontal) */}
       <div className="px-6 mb-8">
-          <h2 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3 px-1">My Dashboard</h2>
+          <h2 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3 px-1">{t.dashboard}</h2>
           <div className="grid grid-cols-3 gap-3 h-32">
               
               {/* Card 1: Achievements */}
@@ -214,7 +232,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   </div>
                   <div className="text-white relative z-10">
                       <div className="text-xl font-bold leading-none mb-0.5">{unlockedAchievements}</div>
-                      <div className="text-[10px] font-semibold opacity-90">勋章墙</div>
+                      <div className="text-[10px] font-semibold opacity-90">{t.achievements}</div>
                   </div>
               </button>
 
@@ -231,7 +249,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   </div>
                   <div className="text-white relative z-10">
                       <div className="text-xl font-bold leading-none mb-0.5">{pendingMistakes}</div>
-                      <div className="text-[10px] font-semibold opacity-90">错题本</div>
+                      <div className="text-[10px] font-semibold opacity-90">{t.mistakes}</div>
                   </div>
               </button>
 
@@ -248,7 +266,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   </div>
                   <div className="text-white relative z-10">
                       <div className="text-xl font-bold leading-none mb-0.5">{historyCount}</div>
-                      <div className="text-[10px] font-semibold opacity-90">飞行日志</div>
+                      <div className="text-[10px] font-semibold opacity-90">{t.logs}</div>
                   </div>
               </button>
 
@@ -257,7 +275,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
       {/* 3. Flight Deck Configuration (Settings) */}
       <div className="px-6 mb-8">
-         <h2 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3 px-1">Settings</h2>
+         <h2 className="text-sm font-bold text-ios-subtext uppercase tracking-widest mb-3 px-1">{t.settings}</h2>
          <div className="bg-white rounded-2xl shadow-soft border border-gray-100 overflow-hidden">
              
              {/* Setting Item: Training Difficulty */}
@@ -266,7 +284,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                     </div>
-                    <span className="text-sm font-medium text-gray-900">训练难度 (Difficulty)</span>
+                    <span className="text-sm font-medium text-gray-900">{t.difficulty}</span>
                  </div>
                  
                  <div className="relative">
@@ -292,7 +310,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                         <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center">
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         </div>
-                        <span className="text-sm font-medium text-gray-900">区域口音 (Accent)</span>
+                        <span className="text-sm font-medium text-gray-900">{t.accent}</span>
                      </div>
                  </div>
                  <button 
@@ -305,13 +323,13 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
              </div>
 
              {/* Setting Item: Cockpit Noise */}
-             <div className="p-4 flex items-center justify-between">
+             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
                  <div className="flex flex-col">
                     <div className="flex items-center space-x-3">
                         <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center">
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /></svg>
                         </div>
-                        <span className="text-sm font-medium text-gray-900">驾驶舱噪音 (Sim)</span>
+                        <span className="text-sm font-medium text-gray-900">{t.noise}</span>
                     </div>
                  </div>
                  <button 
@@ -323,6 +341,33 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                  </button>
              </div>
 
+             {/* Setting Item: Language (NEW) */}
+             <div className="p-4 flex items-center justify-between">
+                 <div className="flex flex-col">
+                    <div className="flex items-center space-x-3">
+                        <div className="w-8 h-8 rounded-lg bg-blue-50 text-ios-blue flex items-center justify-center">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">{t.language}</span>
+                    </div>
+                 </div>
+                 
+                 <div className="flex bg-gray-100 p-1 rounded-lg">
+                     <button 
+                       onClick={() => setLanguage('cn')}
+                       className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${language === 'cn' ? 'bg-white text-ios-blue shadow-sm' : 'text-gray-400'}`}
+                     >
+                         中文
+                     </button>
+                     <button 
+                       onClick={() => setLanguage('en')}
+                       className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${language === 'en' ? 'bg-white text-ios-blue shadow-sm' : 'text-gray-400'}`}
+                     >
+                         EN
+                     </button>
+                 </div>
+             </div>
+
          </div>
       </div>
 
@@ -332,10 +377,10 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
             onClick={handleSignOut}
             className="w-full py-3 rounded-xl border border-gray-200 text-red-500 font-bold text-sm hover:bg-red-50 transition-colors"
           >
-              Log Out
+              {t.logout}
           </button>
           <p className="text-center text-[10px] text-gray-400 mt-4">
-              v3.3 • Connected to Supabase
+              v3.4 • Connected to Supabase
           </p>
       </div>
 
@@ -373,6 +418,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <AssessmentReport 
             data={selectedReport} 
             onClose={handleCloseReport}
+            language={language}
           />
       )}
 

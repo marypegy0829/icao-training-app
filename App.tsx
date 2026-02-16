@@ -8,7 +8,7 @@ import TrainingScreen from './screens/TrainingScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AuthScreen from './screens/AuthScreen';
 import CompleteProfileScreen from './screens/CompleteProfileScreen';
-import { Tab, Scenario, DifficultyLevel } from './types';
+import { Tab, Scenario, DifficultyLevel, AppLanguage } from './types';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -24,6 +24,7 @@ const App: React.FC = () => {
   const [difficulty, setDifficulty] = useState<DifficultyLevel>(DifficultyLevel.LEVEL_4_RECURRENT);
   const [accentEnabled, setAccentEnabled] = useState<boolean>(false); 
   const [cockpitNoise, setCockpitNoise] = useState<boolean>(false); // Default OFF
+  const [appLanguage, setAppLanguage] = useState<AppLanguage>('cn'); // Default CN
 
   // Helper to check profile status
   const checkProfile = async () => {
@@ -78,6 +79,9 @@ const App: React.FC = () => {
     const savedNoise = localStorage.getItem('icao_cockpit_noise');
     if (savedNoise) setCockpitNoise(savedNoise === 'true');
 
+    const savedLang = localStorage.getItem('icao_app_language');
+    if (savedLang === 'en' || savedLang === 'cn') setAppLanguage(savedLang as AppLanguage);
+
     return () => subscription.unsubscribe();
   }, []);
 
@@ -90,6 +94,11 @@ const App: React.FC = () => {
   const handleSetNoise = (enabled: boolean) => {
       setCockpitNoise(enabled);
       localStorage.setItem('icao_cockpit_noise', String(enabled));
+  };
+
+  const handleSetLanguage = (lang: AppLanguage) => {
+      setAppLanguage(lang);
+      localStorage.setItem('icao_app_language', lang);
   };
 
   const handleStartScenario = (scenario: Scenario) => {
@@ -139,6 +148,7 @@ const App: React.FC = () => {
             difficulty={difficulty}
             accentEnabled={accentEnabled}
             cockpitNoise={cockpitNoise}
+            language={appLanguage}
           />
         );
       case 'assessment':
@@ -147,6 +157,7 @@ const App: React.FC = () => {
                 difficulty={difficulty} 
                 accentEnabled={accentEnabled}
                 cockpitNoise={cockpitNoise}
+                language={appLanguage}
             />
         );
       case 'profile':
@@ -158,11 +169,20 @@ const App: React.FC = () => {
                 setAccentEnabled={handleSetAccent}
                 cockpitNoise={cockpitNoise}
                 setCockpitNoise={handleSetNoise}
+                language={appLanguage}
+                setLanguage={handleSetLanguage}
             />
         );
       default:
-        return <AssessmentScreen difficulty={difficulty} accentEnabled={accentEnabled} cockpitNoise={cockpitNoise} />;
+        return <AssessmentScreen difficulty={difficulty} accentEnabled={accentEnabled} cockpitNoise={cockpitNoise} language={appLanguage} />;
     }
+  };
+
+  const labels = {
+      home: appLanguage === 'cn' ? '首页' : 'Home',
+      training: appLanguage === 'cn' ? '训练' : 'Training',
+      assessment: appLanguage === 'cn' ? '评估' : 'Assessment',
+      profile: appLanguage === 'cn' ? '我的' : 'Profile',
   };
 
   return (
@@ -184,7 +204,7 @@ const App: React.FC = () => {
           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
           </svg>
-          <span className="text-[10px] font-medium">首页</span>
+          <span className="text-[10px] font-medium">{labels.home}</span>
         </button>
 
         {/* Training Tab */}
@@ -195,7 +215,7 @@ const App: React.FC = () => {
           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
-          <span className="text-[10px] font-medium">训练</span>
+          <span className="text-[10px] font-medium">{labels.training}</span>
         </button>
 
         {/* Assessment Tab */}
@@ -210,7 +230,7 @@ const App: React.FC = () => {
              </svg>
              {currentTab === 'assessment' && <div className="absolute top-0 right-0 w-2 h-2 bg-ios-orange rounded-full"></div>}
           </div>
-          <span className="text-[10px] font-medium">评估</span>
+          <span className="text-[10px] font-medium">{labels.assessment}</span>
         </button>
 
         {/* Profile Tab */}
@@ -221,7 +241,7 @@ const App: React.FC = () => {
           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>
-          <span className="text-[10px] font-medium">我的</span>
+          <span className="text-[10px] font-medium">{labels.profile}</span>
         </button>
 
       </div>

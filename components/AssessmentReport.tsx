@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { AssessmentData } from '../types';
+import { AssessmentData, AppLanguage } from '../types';
 import RadarChart from './RadarChart';
 import { userService } from '../services/userService';
 import { mistakeService } from '../services/mistakeService';
@@ -8,9 +8,10 @@ import { mistakeService } from '../services/mistakeService';
 interface Props {
   data: AssessmentData;
   onClose: () => void;
+  language?: AppLanguage; // Support localization
 }
 
-const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
+const AssessmentReport: React.FC<Props> = ({ data, onClose, language = 'cn' }) => {
   const passed = data.overallScore >= 4;
   
   // Track which mistakes have been saved in this session
@@ -20,11 +21,33 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
     window.print();
   };
 
+  // Translations
+  const t = {
+      overall: language === 'cn' ? '总体等级' : 'Overall Level',
+      passed: language === 'cn' ? '合格' : 'OPERATIONAL',
+      failed: language === 'cn' ? '不合格' : 'BELOW STANDARD',
+      execSummary: language === 'cn' ? '综合评估' : 'Executive Summary',
+      safetyMargin: language === 'cn' ? '安全裕度' : 'Safety Margin',
+      commFriction: language === 'cn' ? '沟通摩擦' : 'Comm Friction',
+      dimAnalysis: language === 'cn' ? '六大维度详解' : 'Dimensional Analysis',
+      rootCause: language === 'cn' ? '错误溯源' : 'Root Cause Analysis',
+      youSaid: language === 'cn' ? '你的录音' : 'You Said',
+      better: language === 'cn' ? '标准示范' : 'Better / Standard',
+      icaoPrinciple: language === 'cn' ? 'ICAO 原则' : 'ICAO Principle',
+      trainingPlan: language === 'cn' ? '后续训练建议' : 'Training Syllabus',
+      close: language === 'cn' ? '关闭' : 'Close',
+      export: language === 'cn' ? '导出报告' : 'Export Report',
+      saveMistake: language === 'cn' ? '收藏错题' : 'Save Mistake',
+      saved: language === 'cn' ? '已收藏' : 'Saved',
+      excellent: language === 'cn' ? '表现优异' : 'Excellent Performance',
+      noErrors: language === 'cn' ? '本次通话未检测到重大语言失误。' : 'No critical linguistic errors detected in this session.'
+  };
+
   const handleSaveMistake = async (item: any, idx: number) => {
       try {
           const uid = await userService.getCurrentUserId();
           if (!uid) {
-              alert("请先登录 (Please login first)");
+              alert(language === 'cn' ? "请先登录" : "Please login first");
               return;
           }
           await mistakeService.addMistake(
@@ -36,10 +59,9 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
               item.theory
           );
           setSavedMistakeIndices(prev => [...prev, idx]);
-          // Optional: Tiny toast or feedback could go here, but button state change is enough
       } catch (e) {
           console.error("Failed to save mistake", e);
-          alert("保存失败 (Failed to save)");
+          alert(language === 'cn' ? "保存失败" : "Failed to save");
       }
   };
 
@@ -59,7 +81,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
         <div className="flex justify-between items-end mb-3">
             <div>
                 <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider print:text-xs print:text-gray-600">{title}</h4>
-                <div className="text-sm font-bold text-gray-900 print:text-base">{cnTitle}</div>
+                <div className="text-sm font-bold text-gray-900 print:text-base">{language === 'cn' ? cnTitle : title}</div>
             </div>
             <div className={`text-2xl font-black ${score >= 4 ? 'text-ios-blue' : 'text-orange-500'}`}>
                 {score}<span className="text-xs text-gray-300 font-normal ml-0.5 print:text-gray-500">/6</span>
@@ -72,7 +94,9 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                 style={{width: `${(score/6)*100}%`}}
             ></div>
         </div>
-        <p className="text-xs text-gray-600 leading-relaxed text-justify print:text-sm print:leading-normal print:text-gray-800">{detail || "暂无详细反馈。"}</p>
+        <p className="text-xs text-gray-600 leading-relaxed text-justify print:text-sm print:leading-normal print:text-gray-800">
+            {detail || (language === 'cn' ? "暂无详细反馈。" : "No detailed feedback.")}
+        </p>
     </div>
   );
 
@@ -165,16 +189,16 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
         <div className="flex justify-between items-center p-4 bg-white/80 backdrop-blur-md border-b border-gray-200 no-print sticky top-0 z-50">
           <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-full transition-colors flex items-center">
             <svg className="w-5 h-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-            Close
+            {t.close}
           </button>
           <div className="flex space-x-3">
              <div className="hidden sm:flex items-center space-x-2 text-xs text-gray-400 mr-2">
                 <span className={`w-2 h-2 rounded-full ${passed ? 'bg-green-500' : 'bg-red-500'}`}></span>
-                <span>{passed ? 'PASSED (Level 4+)' : 'RETRY (Below Level 4)'}</span>
+                <span>{passed ? `PASSED (${language === 'cn' ? '合格' : 'OK'})` : `RETRY (${language === 'cn' ? '需重考' : 'Fail'})`}</span>
              </div>
             <button onClick={exportPDF} className="px-5 py-2 text-sm font-bold text-white bg-ios-text hover:bg-gray-800 rounded-full transition-colors shadow-lg flex items-center">
               <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-              Export Report
+              {t.export}
             </button>
           </div>
         </div>
@@ -213,10 +237,10 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
               <div className="md:col-span-4 flex flex-col print:mb-6 print:border print:border-gray-200 print:rounded-2xl">
                    <div className={`flex-1 rounded-[2rem] p-8 text-white text-center shadow-xl relative overflow-hidden flex flex-col justify-center items-center min-h-[280px] ${passed ? 'bg-gradient-to-br from-gray-900 to-gray-800 print:bg-gray-900' : 'bg-gradient-to-br from-red-600 to-red-500 print:bg-red-600'}`}>
                        <div className="relative z-10">
-                           <div className="text-xs uppercase opacity-60 font-bold tracking-[0.2em] mb-2 text-white print:text-gray-200">Overall Level</div>
+                           <div className="text-xs uppercase opacity-60 font-bold tracking-[0.2em] mb-2 text-white print:text-gray-200">{t.overall}</div>
                            <div className="text-8xl font-black tracking-tighter mb-4 text-white">{data.overallScore}</div>
                            <div className={`inline-block px-6 py-2 rounded-full text-xs font-bold backdrop-blur-md border ${passed ? 'bg-white/10 border-white/20' : 'bg-black/20 border-black/10'} print:bg-white print:text-black print:border-none`}>
-                               {passed ? 'OPERATIONAL (合格)' : 'BELOW STANDARD (不合格)'}
+                               {passed ? t.passed : t.failed}
                            </div>
                        </div>
                    </div>
@@ -231,7 +255,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                       <div className="avoid-break">
                           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center print:text-gray-600 print:text-sm">
                              <span className="w-1.5 h-1.5 rounded-full bg-ios-blue mr-2 print:bg-black"></span>
-                             Executive Summary (综合评估)
+                             {t.execSummary}
                           </h3>
                           <p className="text-sm text-gray-800 font-medium leading-relaxed text-justify print:text-base print:text-black">
                               {data.executiveSummary?.assessment || "Assessment pending..."}
@@ -243,7 +267,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                            {/* Safety Margin */}
                            <div className="avoid-break">
                                <div className="flex justify-between text-xs font-bold mb-1 print:text-sm">
-                                   <span className="text-gray-500 print:text-black">Safety Margin (安全裕度)</span>
+                                   <span className="text-gray-500 print:text-black">{t.safetyMargin}</span>
                                    <span className={`${data.overallScore >= 4 ? 'text-green-600' : 'text-red-600'}`}>
                                        {data.overallScore >= 5 ? 'HIGH' : data.overallScore >= 4 ? 'ACCEPTABLE' : 'CRITICAL'}
                                    </span>
@@ -260,7 +284,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                            {/* Friction Points */}
                            <div className="avoid-break">
                                <div className="flex justify-between text-xs font-bold mb-1 print:text-sm">
-                                   <span className="text-gray-500 print:text-black">Comm Friction (沟通摩擦)</span>
+                                   <span className="text-gray-500 print:text-black">{t.commFriction}</span>
                                    <span className="text-orange-500">ANALYSIS</span>
                                </div>
                                <div className="bg-orange-50 border border-orange-100 rounded-lg p-2 text-[10px] font-medium text-orange-800 leading-tight print:text-sm print:bg-white print:border-gray-300 print:text-black">
@@ -276,7 +300,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
           <section className="avoid-break">
              <div className="flex items-center space-x-3 mb-6 border-b border-gray-100 pb-3 print:border-gray-300 print:mt-4">
                 <div className="w-8 h-8 rounded-lg bg-ios-blue text-white flex items-center justify-center font-bold font-serif print:bg-black print:text-white">6</div>
-                <h2 className="text-lg font-bold text-gray-900 uppercase tracking-tight">Dimensional Analysis <span className="text-gray-400 font-normal ml-2 print:text-gray-600">六大维度详解</span></h2>
+                <h2 className="text-lg font-bold text-gray-900 uppercase tracking-tight">{t.dimAnalysis}</h2>
              </div>
              {/* Force grid layout for print to avoid single column stacking */}
              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 print:grid-cols-2">
@@ -295,14 +319,14 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                 <div className="w-8 h-8 rounded-lg bg-gray-900 text-white flex items-center justify-center print:bg-black">
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
                 </div>
-                <h2 className="text-lg font-bold text-gray-900 uppercase tracking-tight">Root Cause Analysis <span className="text-gray-400 font-normal ml-2 print:text-gray-600">错误溯源</span></h2>
+                <h2 className="text-lg font-bold text-gray-900 uppercase tracking-tight">{t.rootCause}</h2>
              </div>
              
              {(!data.deepAnalysis || data.deepAnalysis.length === 0) ? (
                  <div className="bg-green-50 text-green-800 p-8 rounded-2xl border border-green-100 text-center print:bg-white print:border-gray-300 print:text-black">
                      <div className="text-2xl mb-2">✨</div>
-                     <div className="font-bold">Excellent Performance</div>
-                     <div className="text-sm opacity-80">No critical linguistic errors detected in this session.</div>
+                     <div className="font-bold">{t.excellent}</div>
+                     <div className="text-sm opacity-80">{t.noErrors}</div>
                  </div>
              ) : (
                  <div className="space-y-4">
@@ -321,7 +345,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                                   className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors flex items-center space-x-1 no-print ${savedMistakeIndices.includes(idx) ? 'bg-green-100 text-green-600' : 'bg-gray-200 text-gray-600 hover:bg-ios-blue hover:text-white'}`}
                                 >
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
-                                    <span>{savedMistakeIndices.includes(idx) ? '已收藏' : '收藏错题'}</span>
+                                    <span>{savedMistakeIndices.includes(idx) ? t.saved : t.saveMistake}</span>
                                 </button>
                             </div>
 
@@ -333,7 +357,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                                     <div className="relative">
                                         <div className="absolute left-0 top-3 bottom-3 w-1 bg-red-400 rounded-full print:bg-black"></div>
                                         <div className="pl-4">
-                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 print:text-gray-600">You Said</div>
+                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 print:text-gray-600">{t.youSaid}</div>
                                             <div className="bg-red-50 text-red-900 p-3 rounded-lg text-sm font-mono leading-relaxed border border-red-100 print:bg-white print:text-black print:border-gray-300 print:italic">
                                                 "{item.context}"
                                             </div>
@@ -344,7 +368,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                                     <div className="relative">
                                         <div className="absolute left-0 top-3 bottom-3 w-1 bg-green-500 rounded-full print:bg-black"></div>
                                         <div className="pl-4">
-                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 print:text-gray-600">Better / Standard</div>
+                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 print:text-gray-600">{t.better}</div>
                                             <div className="bg-green-50 text-green-800 p-3 rounded-lg text-sm font-mono leading-relaxed border border-green-100 font-semibold print:bg-white print:text-black print:border-gray-300 print:font-bold">
                                                 {item.correction}
                                             </div>
@@ -355,7 +379,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                                 {/* Right: Explanation */}
                                 <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 flex flex-col justify-center print:bg-white print:border-none print:p-0">
                                      <div className="mb-3">
-                                         <div className="text-[10px] font-bold text-ios-blue uppercase tracking-wider mb-1 print:text-black">ICAO Principle</div>
+                                         <div className="text-[10px] font-bold text-ios-blue uppercase tracking-wider mb-1 print:text-black">{t.icaoPrinciple}</div>
                                          <p className="text-xs text-gray-600 leading-relaxed italic print:text-sm print:text-gray-800 print:not-italic">
                                              {item.theory}
                                          </p>
@@ -381,7 +405,7 @@ const AssessmentReport: React.FC<Props> = ({ data, onClose }) => {
                 <div className="w-8 h-8 rounded-lg bg-ios-orange text-white flex items-center justify-center print:bg-black">
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                 </div>
-                <h2 className="text-lg font-bold text-gray-900 uppercase tracking-tight">Training Syllabus <span className="text-gray-400 font-normal ml-2 print:text-gray-600">后续训练建议</span></h2>
+                <h2 className="text-lg font-bold text-gray-900 uppercase tracking-tight">{t.trainingPlan}</h2>
              </div>
              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 print:grid-cols-3">
                 {(data.remedialPlan || []).map((plan, idx) => (

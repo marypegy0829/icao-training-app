@@ -1,8 +1,9 @@
 
 import { Scenario, FlightPhase } from '../types';
 
+// 1. Broad Categories (Existing)
 export const SCENARIO_CATEGORIES = [
-  "Operational & Weather", // New category for routine but complex interactions
+  "Operational & Weather", 
   "Powerplant",
   "Fire, Smoke & Pressurization",
   "Landing Gear, Brakes & Tires",
@@ -13,6 +14,43 @@ export const SCENARIO_CATEGORIES = [
 
 export type ScenarioCategory = typeof SCENARIO_CATEGORIES[number];
 
+// 2. Granular Tags (New: For finer filtering and logic enforcement)
+export type TrainingTag = 
+  | 'Hydraulics' | 'Electrics' | 'Fuel' | 'Nav/Comms' | 'Flight Controls' // Systems
+  | 'Engine Fail' | 'Engine Fire' | 'Bird Strike' // Powerplant
+  | 'Gear' | 'Brakes' | 'Tires' | 'Steering' // Landing Gear
+  | 'De-icing' | 'Windshear' | 'Visibility' | 'Turbulence' | 'Runway State' // Weather
+  | 'Medical' | 'Incapacitation' | 'Fatigue' // Human
+  | 'Unruly Pax' | 'Bomb Threat' | 'Laser' | 'Drone'; // Security
+
+// 3. Logic Matrix: Defines valid failures for each flight phase (Flight Logic / Anti-Error)
+export const PHASE_LOGIC_CONFIG: Record<FlightPhase, TrainingTag[]> = {
+    'Ground Ops': [
+        'Steering', 'Brakes', 'Tires', 'De-icing', 'Medical', 'Engine Fire', 
+        'Hydraulics', 'Electrics', 'Visibility', 'Unruly Pax', 'Nav/Comms'
+    ],
+    'Takeoff & Climb': [
+        'Engine Fail', 'Engine Fire', 'Bird Strike', 'Windshear', 'Tires', 
+        'Gear', 'Pressurization' as any, 'Medical', 'Drone', 'Runway State'
+    ],
+    'Cruise & Enroute': [
+        'Medical', 'Incapacitation', 'Pressurization' as any, 'Turbulence', 
+        'Fuel', 'Electrics', 'Hydraulics', 'Unruly Pax', 'Engine Fail', 'Fire' as any
+    ],
+    'Descent & Approach': [
+        'Gear', 'Flaps' as any, 'Hydraulics', 'Fuel', 'Windshear', 'Visibility',
+        'Laser', 'Drone', 'Medical', 'Nav/Comms'
+    ],
+    'Landing & Taxi in': [
+        'Brakes', 'Tires', 'Steering', 'Runway State', 'Windshear', 
+        'Medical', 'Hydraulics', 'Gear'
+    ],
+    'Go-around & Diversion': [
+        'Fuel', 'Windshear', 'Visibility', 'Gear', 'Engine Fail', 
+        'Runway State', 'Medical'
+    ]
+};
+
 // Helper to create scenarios easily
 const create = (
   id: string, 
@@ -20,94 +58,78 @@ const create = (
   title: string, 
   details: string, 
   phase: FlightPhase,
-  weather: string = 'VMC, Wind Calm, CAVOK'
-): Scenario => ({
+  tags: TrainingTag[], // Added Tags
+  weather: string = 'VMC, Wind Calm, CAVOK',
+  difficulty: 'Easy' | 'Medium' | 'Hard' | 'Extreme' = 'Medium'
+): Scenario & { tags: TrainingTag[] } => ({
   id,
   category,
   title,
   details,
   phase,
   weather, 
-  callsign: 'Training 001'
+  difficulty_level: difficulty,
+  callsign: 'Training 001',
+  tags: tags
 });
 
-export const TRAINING_SCENARIOS: Scenario[] = [
+export const TRAINING_SCENARIOS: (Scenario & { tags: TrainingTag[] })[] = [
   // ============================================================
-  // PHASE 1: GROUND OPS (地面准备与滑行)
-  // Focus: Pushback, Complex Taxi, Delays, Ground Issues
+  // PHASE 1: GROUND OPS
   // ============================================================
-  create('push_complex', 'Operational & Weather', 'Conditional Pushback', 'Ready for pushback. Tug connected. Expect conditional clearance due to traffic behind.', 'Ground Ops'),
-  create('taxi_giveway', 'Operational & Weather', 'Complex Taxi Instructions', 'Taxi to holding point 36R via Alpha, Bravo. Give way to B737 passing left to right.', 'Ground Ops'),
-  create('slot_delay', 'Operational & Weather', 'CTOT / Slot Delay', 'We have a slot time of 45. Request start up at 35 to meet CTOT.', 'Ground Ops'),
-  create('tech_return', 'Operational & Weather', 'Return to Stand', 'Technical trouble after pushback. Request return to stand.', 'Ground Ops'),
-  create('vis_taxi', 'Operational & Weather', 'Low Visibility Taxi', 'LVO procedures in force. Taxi via greens to CAT III holding point.', 'Ground Ops', 'RVR 350m, Fog'),
-  create('apu_fire', 'Powerplant', 'APU Fire on Ground', 'Fire bell ringing during pre-flight. Request fire services.', 'Ground Ops'),
-  create('hot_brakes', 'Landing Gear, Brakes & Tires', 'Hot Brakes', 'Brake overheat warning after heavy braking on arrival/taxi.', 'Ground Ops'),
+  create('push_complex', 'Operational & Weather', 'Conditional Pushback', 'Ready for pushback. Tug connected. Expect conditional clearance due to traffic behind.', 'Ground Ops', ['Visibility'], 'VMC', 'Medium'),
+  create('taxi_giveway', 'Operational & Weather', 'Complex Taxi Instructions', 'Taxi to holding point active runway via specific route. Give way to crossing traffic.', 'Ground Ops', ['Visibility'], 'VMC', 'Hard'),
+  create('slot_delay', 'Operational & Weather', 'CTOT / Slot Delay', 'We have a slot time restriction. Request start up to meet new CTOT.', 'Ground Ops', ['Nav/Comms'], 'VMC', 'Medium'),
+  create('apu_fire', 'Powerplant', 'APU Fire on Ground', 'Fire bell ringing during pre-flight. Request fire services immediately.', 'Ground Ops', ['Engine Fire'], 'VMC', 'Hard'),
+  create('vis_taxi', 'Operational & Weather', 'Low Visibility Taxi', 'LVO procedures in force. Taxi via greens to CAT III holding point.', 'Ground Ops', ['Visibility'], 'RVR 350m, Fog', 'Hard'),
+  create('med_gate', 'Medical & Human Factors', 'Sick Passenger at Gate', 'Passenger complaining of chest pain during boarding. Request paramedics.', 'Ground Ops', ['Medical'], 'VMC', 'Medium'),
+  create('hyd_leak_gnd', 'Systems', 'Hydraulic Leak on Stand', 'Ground crew noticed red fluid leak. Maintenance required.', 'Ground Ops', ['Hydraulics'], 'VMC', 'Medium'),
 
   // ============================================================
-  // PHASE 2: TAKEOFF & CLIMB (起飞与爬升)
-  // Focus: Takeoff Clearance, Immediate Departure, Level Change
+  // PHASE 2: TAKEOFF & CLIMB
   // ============================================================
-  create('imm_dep', 'Operational & Weather', 'Immediate Departure', 'Traffic on final (3 miles). Request immediate departure.', 'Takeoff & Climb'),
-  create('abort_tfc', 'Security & External Hazards', 'Rejected Takeoff (Traffic)', 'Vehicle entering runway. Stop immediately! Cancel takeoff clearance.', 'Takeoff & Climb'),
-  create('eng_v1', 'Powerplant', 'Engine Failure after V1', 'Engine failure immediately after V1 call. Continue takeoff. Mayday.', 'Takeoff & Climb'),
-  create('eng_fire', 'Powerplant', 'Engine Fire on Departure', 'MAYDAY. Engine No.2 Fire. Request immediate return.', 'Takeoff & Climb'),
-  create('tire_burst', 'Landing Gear, Brakes & Tires', 'Tire Burst on Takeoff', 'Loud bang on takeoff run. Suspected tire burst. Continuing to safety altitude.', 'Takeoff & Climb'),
-  create('level_turb', 'Operational & Weather', 'Level Off (Turbulence)', 'Request to level off at 6000m due to severe turbulence in climb.', 'Takeoff & Climb', 'Mod/Sev Turbulence'),
-  create('perf_climb', 'Operational & Weather', 'Unable Expedite Climb', 'Unable to comply with expedite instruction due to heavy weight/performance.', 'Takeoff & Climb'),
-  create('alt_warn', 'Fire, Smoke & Pressurization', 'Cabin Altitude Warning', 'Intermittent cabin altitude horn during climb. Leveling off.', 'Takeoff & Climb'),
+  create('eng_fire', 'Powerplant', 'Engine Fire on Departure', 'MAYDAY. Engine No.2 Fire immediately after airborne. Request immediate return.', 'Takeoff & Climb', ['Engine Fire'], 'VMC', 'Hard'),
+  create('abort_tfc', 'Security & External Hazards', 'Rejected Takeoff (Traffic)', 'Vehicle entering runway. Stop immediately! Cancel takeoff clearance.', 'Takeoff & Climb', ['Runway State'], 'VMC', 'Hard'),
+  create('eng_v1', 'Powerplant', 'Engine Failure V1', 'Engine failure right at V1. Continued takeoff. Engine fire warning. Mayday.', 'Takeoff & Climb', ['Engine Fail'], 'VMC', 'Extreme'),
+  create('windshear_dep', 'Operational & Weather', 'Windshear Alert', 'Windshear warning on departure. Loss of airspeed. Escape maneuver.', 'Takeoff & Climb', ['Windshear'], 'Stormy', 'Hard'),
+  create('bird_strike', 'Security & External Hazards', 'Bird Strike', 'Hit flock of birds. Vibration No.1 engine. Returning to land.', 'Takeoff & Climb', ['Bird Strike', 'Engine Fail'], 'VMC', 'Medium'),
+  create('tcas_ra', 'Operational & Weather', 'TCAS RA Climb', 'Traffic Conflict. TCAS Resolution Advisory "CLIMB". Deviating from clearance.', 'Takeoff & Climb', ['Nav/Comms'], 'VMC', 'Hard'),
 
   // ============================================================
-  // PHASE 3: CRUISE & ENROUTE (巡航与航路)
-  // Focus: Wx Deviation, Turbulence, Routing, Medical
+  // PHASE 3: CRUISE & ENROUTE
   // ============================================================
-  create('wx_dev', 'Operational & Weather', 'Weather Deviation', 'Request deviation 10 miles right of track to avoid build-ups.', 'Cruise & Enroute', 'CB Clouds Vicinity'),
-  create('wx_heading', 'Operational & Weather', 'Vector for Weather', 'We are avoiding weather. Request heading 090 for 20 miles.', 'Cruise & Enroute', 'Thunderstorms'),
-  create('turb_desc', 'Operational & Weather', 'Descent for Smooth Air', 'Reporting moderate to severe turbulence at FL300. Request descent FL280.', 'Cruise & Enroute', 'CAT reported'),
-  create('direct_rte', 'Operational & Weather', 'Direct Routing', 'Request direct to VOR ABC to save fuel/time.', 'Cruise & Enroute'),
-  create('incap', 'Medical & Human Factors', 'Pilot Incapacitation', 'Captain has fainted (food poisoning). FO flying solo.', 'Cruise & Enroute'),
-  create('heart_atk', 'Medical & Human Factors', 'Passenger Heart Attack', 'Passenger requiring immediate medical assistance. Request diversion.', 'Cruise & Enroute'),
-  create('labor', 'Medical & Human Factors', 'Passenger in Labor', 'Pregnant passenger giving birth. Request priority.', 'Cruise & Enroute'),
-  create('depress', 'Fire, Smoke & Pressurization', 'Rapid Depressurization', 'Explosive decompression. Emergency descent required.', 'Cruise & Enroute'),
-  create('cargo_fire', 'Fire, Smoke & Pressurization', 'Cargo Fire', 'Forward cargo smoke detector activated.', 'Cruise & Enroute'),
-  create('hyd_fail', 'Systems', 'Loss of Hydraulic Sys A', 'Loss of system A pressure. Manual gear extension will be required.', 'Cruise & Enroute'),
-  create('fuel_leak', 'Systems', 'Fuel Leak', 'Visible fuel spray from left wing. Checking balance.', 'Cruise & Enroute'),
-  create('eng_fail', 'Powerplant', 'Engine Failure', 'Engine flameout. Drifting down.', 'Cruise & Enroute'),
-  create('smoke_cockpit', 'Fire, Smoke & Pressurization', 'Smoke in Cockpit', 'Acrid smell and visible smoke. Donning masks.', 'Cruise & Enroute'),
-  create('unruly', 'Security & External Hazards', 'Unruly Passenger', 'Passenger fighting with crew. Restraints applied. Request police.', 'Cruise & Enroute'),
-  create('ash', 'Security & External Hazards', 'Volcanic Ash', 'Entering visible ash cloud. Engine parameters fluctuating.', 'Cruise & Enroute'),
+  create('incap', 'Medical & Human Factors', 'Pilot Incapacitation', 'Captain has fainted (food poisoning). FO flying solo. Mayday.', 'Cruise & Enroute', ['Incapacitation'], 'VMC', 'Extreme'),
+  create('hyd_fail', 'Systems', 'Loss of Hydraulic Sys A', 'Loss of system A pressure. Manual gear extension will be required.', 'Cruise & Enroute', ['Hydraulics'], 'VMC', 'Hard'),
+  create('wx_dev', 'Operational & Weather', 'Weather Deviation', 'Request deviation 10 miles right of track to avoid build-ups.', 'Cruise & Enroute', ['Turbulence'], 'CB Clouds Vicinity', 'Medium'),
+  create('depress', 'Fire, Smoke & Pressurization', 'Rapid Depressurization', 'Explosive decompression. Emergency descent to FL100 initiated. Mayday.', 'Cruise & Enroute', ['Pressurization' as any], 'VMC', 'Extreme'),
+  create('unruly', 'Security & External Hazards', 'Unruly Passenger', 'Passenger fighting with crew. Restraints applied. Request police on arrival.', 'Cruise & Enroute', ['Unruly Pax'], 'VMC', 'Hard'),
+  create('fuel_leak', 'Systems', 'Fuel Leak', 'Visible fuel spray from left wing. Checking balance. Shutting down engine.', 'Cruise & Enroute', ['Fuel', 'Engine Fail'], 'VMC', 'Hard'),
+  create('volcanic_ash', 'Security & External Hazards', 'Volcanic Ash Encounter', 'St Elmos fire, acrid smell. Turning 180 degrees immediately.', 'Cruise & Enroute', ['Visibility', 'Engine Fail'], 'Night', 'Extreme'),
 
   // ============================================================
-  // PHASE 4: DESCENT & APPROACH (下降与进近)
-  // Focus: Vectoring, Holding, Approach Stability
+  // PHASE 4: DESCENT & APPROACH
   // ============================================================
-  create('vec_ils', 'Operational & Weather', 'Vector to Intercept', 'Turn left heading 240 to intercept the localizer 27L.', 'Descent & Approach'),
-  create('min_fuel', 'Systems', 'Minimum Fuel', 'Holding time exceeded. Declaring Minimum Fuel. Request priority vectoring.', 'Descent & Approach'),
-  create('gear_unsafe', 'Landing Gear, Brakes & Tires', 'Landing Gear Unsafe', 'Nose gear light remains red. Request orbit to troubleshoot.', 'Descent & Approach'),
-  create('flap_asy', 'Systems', 'Flap Asymmetry', 'Flaps locked between positions. High speed approach expected.', 'Descent & Approach'),
-  create('laser', 'Security & External Hazards', 'Laser Illumination', 'Green laser flash in cockpit on final.', 'Descent & Approach'),
-  create('drone', 'Security & External Hazards', 'Drone Sighting', 'Drone reported 100ft below on final approach path.', 'Descent & Approach'),
+  create('gear_unsafe', 'Landing Gear, Brakes & Tires', 'Landing Gear Unsafe', 'Nose gear light remains red. Request orbit to troubleshoot/gravity extension.', 'Descent & Approach', ['Gear'], 'VMC', 'Hard'),
+  create('min_fuel', 'Systems', 'Minimum Fuel', 'Holding time exceeded. Declaring Minimum Fuel. Request priority vectoring.', 'Descent & Approach', ['Fuel'], 'Headwinds', 'Hard'),
+  create('laser', 'Security & External Hazards', 'Laser Illumination', 'Green laser flash in cockpit on final. Vision impaired temporarily.', 'Descent & Approach', ['Laser', 'Visibility'], 'Night', 'Medium'),
+  create('flap_jam', 'Systems', 'Flap Jam', 'Flaps jammed at 10 degrees. High speed landing expected. Request emergency equipment.', 'Descent & Approach', ['Flaps' as any, 'Flight Controls'], 'VMC', 'Hard'),
+  create('ils_fail', 'Operational & Weather', 'ILS Failure', 'Glide path unreliable. Discontinuing approach. Request RNAV/Visual.', 'Descent & Approach', ['Nav/Comms'], 'IMC', 'Medium'),
 
   // ============================================================
-  // PHASE 5: LANDING & TAXI IN (着陆与滑回)
-  // Focus: Landing Issues, Vacating, Ground Handling
+  // PHASE 5: LANDING & TAXI IN
   // ============================================================
-  create('low_pass', 'Operational & Weather', 'Low Pass / Gear Check', 'Request low pass for tower to visually inspect landing gear.', 'Landing & Taxi in'),
-  create('follow_me', 'Operational & Weather', 'Follow Me Car', 'Unfamiliar with airport. Request Follow Me car to stand.', 'Landing & Taxi in'),
-  create('vacate_issue', 'Operational & Weather', 'Unable to Vacate', 'Missed exit due to slippery runway. Backtracking required.', 'Landing & Taxi in', 'Heavy Rain'),
-  create('brake_fail', 'Landing Gear, Brakes & Tires', 'Brake Failure', 'Loss of normal braking on landing roll. Stopping on runway.', 'Landing & Taxi in'),
-  create('nose_steer', 'Landing Gear, Brakes & Tires', 'Nose Wheel Steering Fail', 'Unable to vacate runway. NWS failure. Tow truck required.', 'Landing & Taxi in'),
-  create('flat_tire_land', 'Landing Gear, Brakes & Tires', 'Flat Tire on Landing', 'Aircraft pulling to left on rollout. Suspected tire burst.', 'Landing & Taxi in'),
+  create('brake_fail', 'Landing Gear, Brakes & Tires', 'Brake Failure', 'Loss of normal braking on landing roll. Using emergency brake. Risk of overrun.', 'Landing & Taxi in', ['Brakes'], 'Wet', 'Extreme'),
+  create('tire_burst_land', 'Landing Gear, Brakes & Tires', 'Tire Burst on Landing', 'Vibration and loud bang on touchdown. Stopping on runway.', 'Landing & Taxi in', ['Tires'], 'VMC', 'Hard'),
+  create('vacate_issue', 'Operational & Weather', 'Unable to Vacate', 'Missed exit due to slippery runway. Backtracking required.', 'Landing & Taxi in', ['Runway State'], 'Heavy Rain', 'Medium'),
+  create('nws_fail', 'Systems', 'Nose Wheel Steering Fail', 'Unable to vacate runway. NWS failure. Tow truck required.', 'Landing & Taxi in', ['Steering'], 'VMC', 'Medium'),
 
   // ============================================================
-  // PHASE 6: GO-AROUND & DIVERSION (复飞与备降)
-  // Focus: Missed Approach, Weather Avoidance, Diversion
+  // PHASE 6: GO-AROUND & DIVERSION
   // ============================================================
-  create('go_around_ws', 'Operational & Weather', 'Go-Around (Windshear)', 'Windshear warning on short final. Going around.', 'Go-around & Diversion', 'Windshear reported'),
-  create('go_around_uns', 'Operational & Weather', 'Unstabilized Approach', 'Too high and fast. Unstabilized. Going around.', 'Go-around & Diversion'),
-  create('go_around_rwy', 'Operational & Weather', 'Go-Around (Runway Occupied)', 'Aircraft still on runway. Going around.', 'Go-around & Diversion'),
-  create('div_weather', 'Operational & Weather', 'Diversion (Weather)', 'Destination below minima. Requesting diversion to Alternate.', 'Go-around & Diversion', 'Fog, RVR 200m'),
-  create('div_medical', 'Medical & Human Factors', 'Diversion (Medical)', 'Passenger condition worsening. Diverting to nearest suitable airport.', 'Go-around & Diversion'),
+  create('go_around_ws', 'Operational & Weather', 'Go-Around (Windshear)', 'Windshear warning on short final. Going around.', 'Go-around & Diversion', ['Windshear'], 'Windshear reported', 'Hard'),
+  create('div_medical', 'Medical & Human Factors', 'Diversion (Medical)', 'Passenger condition worsening. Diverting to nearest suitable airport.', 'Go-around & Diversion', ['Medical'], 'VMC', 'Medium'),
+  create('div_wx', 'Operational & Weather', 'Diversion (Weather)', 'Destination below minima. Requesting diversion to Alternate.', 'Go-around & Diversion', ['Visibility'], 'Fog', 'Medium'),
+  create('blocked_rwy', 'Operational & Weather', 'Blocked Runway', 'Previous arrival burst tire. Runway closed. Diverting.', 'Go-around & Diversion', ['Runway State'], 'VMC', 'Medium'),
 ];
 
 export function getRandomAssessmentScenario(): Scenario {

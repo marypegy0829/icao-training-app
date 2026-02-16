@@ -3,8 +3,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { scenarioService } from '../services/scenarioService';
 import { ruleService } from '../services/ruleService';
 import { userService } from '../services/userService';
+import { airportService, Airport } from '../services/airportService';
 import { LiveClient } from '../services/liveClient';
-import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, DifficultyLevel } from '../types';
+import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, DifficultyLevel, AppLanguage } from '../types';
 import BriefingModal from '../components/BriefingModal';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
@@ -17,15 +18,17 @@ interface AssessmentScreenProps {
     difficulty: DifficultyLevel;
     accentEnabled: boolean;
     cockpitNoise: boolean;
+    language: AppLanguage;
 }
 
-const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentEnabled, cockpitNoise }) => {
+const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentEnabled, cockpitNoise, language }) => {
     // Flow State
     const [view, setView] = useState<'lobby' | 'briefing' | 'exam' | 'report'>('lobby');
     const [showHistory, setShowHistory] = useState(false);
     
     // Data State
     const [scenario, setScenario] = useState<Scenario | null>(null);
+    const [activeAirport, setActiveAirport] = useState<Airport | null>(null); // Store full airport object
     const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [audioLevel, setAudioLevel] = useState(0);
@@ -84,8 +87,13 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         liveClientRef.current.setBufferedMode(true);
         liveClientRef.current.setInputMuted(true);
 
-        // Fetch Dynamic Rules
-        const dynamicRules = await ruleService.getLogicRulesForPhase(examScenario.phase || 'Ground Ops');
+        // Fetch Dynamic Data
+        const [dynamicRules, airportData] = await Promise.all([
+            ruleService.getLogicRulesForPhase(examScenario.phase || 'Ground Ops'),
+            airportService.getAirportByCode(airportCode)
+        ]);
+        
+        setActiveAirport(airportData);
 
         const assessmentInstruction = `
         # SYSTEM INSTRUCTION: ICAO EXAMINER
@@ -168,7 +176,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             accentEnabled,
             cockpitNoise,
             assessmentInstruction,
-            dynamicRules
+            dynamicRules,
+            language
         );
     };
 
@@ -211,6 +220,29 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         }
     };
 
+    // Translation Labels
+    const t = {
+        proficiencyCheck: language === 'cn' ? '能力评估' : 'Proficiency Check',
+        icaoLevel: language === 'cn' ? 'ICAO 4-6级 模拟考试' : 'ICAO Level 4-6 Assessment',
+        standardized: language === 'cn' ? '标准语音评估' : 'Standardized',
+        voiceAssessment: language === 'cn' ? '' : 'Voice Assessment',
+        desc: language === 'cn' ? '模拟特情与非正常情况，基于ICAO六大维度进行评分。' : 'Simulate emergency and non-routine situations. Rated on 6 ICAO dimensions.',
+        time: language === 'cn' ? '约10分钟' : '~10 Mins',
+        skills: language === 'cn' ? '6项技能' : '6 Skills',
+        scoring: language === 'cn' ? '评分标准' : 'Scoring Criteria',
+        begin: language === 'cn' ? '开始评估' : 'Begin Assessment',
+        examSubmitted: language === 'cn' ? '考试已提交' : 'Exam Submitted',
+        generating: language === 'cn' ? '正在生成官方报告...' : 'Generating Official Report...',
+        liveExam: language === 'cn' ? '考试进行中' : 'LIVE EXAM',
+        finish: language === 'cn' ? '结束考试' : 'Finish Exam',
+        situation: language === 'cn' ? '情景简报' : 'Situation Brief',
+        ptt: language === 'cn' ? '按住说话' : 'Push to Talk',
+        transmitting: language === 'cn' ? '正在发送...' : 'Transmitting',
+        holdToSpeak: language === 'cn' ? '按住说话' : 'Hold to Speak',
+        connectionError: language === 'cn' ? '连接错误' : 'Connection Error',
+        returnLobby: language === 'cn' ? '返回大厅' : 'Return to Lobby'
+    };
+
     // --- RENDERERS ---
 
     const renderLobby = () => (
@@ -221,8 +253,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             {/* Header */}
             <div className="pt-12 px-6 pb-2 flex justify-between items-center z-10">
                 <div>
-                    <h1 className="text-3xl font-bold text-ios-text tracking-tight">Proficiency Check</h1>
-                    <p className="text-sm text-ios-subtext font-medium mt-1">ICAO Level 4-6 Assessment</p>
+                    <h1 className="text-3xl font-bold text-ios-text tracking-tight">{t.proficiencyCheck}</h1>
+                    <p className="text-sm text-ios-subtext font-medium mt-1">{t.icaoLevel}</p>
                 </div>
                 <button 
                     onClick={() => setShowHistory(true)}
@@ -248,20 +280,20 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                             </div>
                             <span className="text-2xl">👨‍✈️</span>
                         </div>
-                        <h2 className="text-2xl font-bold text-gray-900 mb-2 leading-tight">Standardized<br/>Voice Assessment</h2>
+                        <h2 className="text-2xl font-bold text-gray-900 mb-2 leading-tight">{t.standardized}<br/>{t.voiceAssessment}</h2>
                         <p className="text-sm text-gray-500 leading-relaxed mb-6 max-w-xs">
-                            Simulate emergency and non-routine situations. Rated on 6 ICAO dimensions.
+                            {t.desc}
                         </p>
                         <div className="flex items-center space-x-4 text-xs font-medium text-gray-400">
-                            <span className="flex items-center"><svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> ~10 Mins</span>
-                            <span className="flex items-center"><svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg> 6 Skills</span>
+                            <span className="flex items-center"><svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> {t.time}</span>
+                            <span className="flex items-center"><svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg> {t.skills}</span>
                         </div>
                     </div>
                 </div>
 
                 {/* Criteria Grid */}
                 <div>
-                    <h3 className="text-xs font-bold text-ios-subtext uppercase tracking-widest mb-4 px-1">Scoring Criteria</h3>
+                    <h3 className="text-xs font-bold text-ios-subtext uppercase tracking-widest mb-4 px-1">{t.scoring}</h3>
                     <div className="grid grid-cols-2 gap-3">
                         {[
                             { name: 'Pronunciation', icon: '🎙️', color: 'bg-orange-50 text-orange-600' },
@@ -288,7 +320,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     onClick={startNewAssessmentProcess}
                     className="w-full bg-ios-text text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-gray-200 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center relative overflow-hidden"
                 >
-                    <span className="relative z-10">Begin Assessment</span>
+                    <span className="relative z-10">{t.begin}</span>
                     <svg className="w-5 h-5 ml-2 relative z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
                     </svg>
@@ -312,8 +344,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                          <div className="w-20 h-20 border-4 border-gray-100 rounded-full"></div>
                          <div className="w-20 h-20 border-4 border-ios-blue border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
                      </div>
-                     <h2 className="text-2xl font-bold mb-2">Exam Submitted</h2>
-                     <p className="text-ios-subtext text-sm">Generating Official Report...</p>
+                     <h2 className="text-2xl font-bold mb-2">{t.examSubmitted}</h2>
+                     <p className="text-ios-subtext text-sm">{t.generating}</p>
                  </div>
             )}
             
@@ -323,7 +355,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     {/* Status Indicator */}
                     <div className="flex items-center space-x-2 bg-white/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/60 shadow-sm">
                         <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                        <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest">LIVE EXAM</span>
+                        <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest">{t.liveExam}</span>
                     </div>
                 </div>
                 
@@ -333,7 +365,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     disabled={status !== ConnectionStatus.CONNECTED}
                     className="bg-white/80 backdrop-blur-md text-ios-red border border-red-100 px-4 py-2 rounded-full text-xs font-bold shadow-sm hover:bg-red-50 active:scale-95 transition-all flex items-center space-x-1"
                 >
-                    <span className="uppercase tracking-wide">Finish Exam</span>
+                    <span className="uppercase tracking-wide">{t.finish}</span>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
@@ -350,7 +382,12 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 </div>
                 {/* Cockpit (Bottom of Top Section) */}
                 <div className="w-full shrink-0">
-                    <CockpitDisplay active={status === ConnectionStatus.CONNECTED} scenario={scenario} />
+                    <CockpitDisplay 
+                        active={status === ConnectionStatus.CONNECTED} 
+                        scenario={scenario} 
+                        airportCode={activeAirport?.icao_code || '----'} // Use activeAirport code
+                        airportData={activeAirport} // PASS FULL AIRPORT DATA
+                    />
                 </div>
             </div>
 
@@ -364,7 +401,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
-                        <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest">Situation Brief</span>
+                        <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest">{t.situation}</span>
                     </div>
 
                     <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
@@ -406,10 +443,10 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                          
                          <div className="flex flex-col items-start">
                              <span className={`text-base font-bold uppercase tracking-wider transition-colors ${isTransmitting ? 'text-white' : 'text-ios-text'}`}>
-                                 {isTransmitting ? 'Transmitting' : 'Push to Talk'}
+                                 {isTransmitting ? t.transmitting : t.ptt}
                              </span>
                              <span className={`text-[10px] font-medium transition-colors ${isTransmitting ? 'text-white/80' : 'text-gray-400'}`}>
-                                 按住说话
+                                 {t.holdToSpeak}
                              </span>
                          </div>
                      </div>
@@ -446,6 +483,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 <AssessmentReport 
                     data={assessment} 
                     onClose={() => setView('lobby')} 
+                    language={language}
                 />
             )}
 
@@ -453,13 +491,13 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             {status === ConnectionStatus.ERROR && (
                 <div className="absolute inset-0 bg-white/90 backdrop-blur-md z-50 flex items-center justify-center flex-col p-8 text-center animate-fade-in">
                     <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4 text-3xl shadow-sm">⚠️</div>
-                    <h2 className="text-xl font-bold text-gray-900 mb-2">Connection Error</h2>
+                    <h2 className="text-xl font-bold text-gray-900 mb-2">{t.connectionError}</h2>
                     <p className="text-gray-500 mb-6 text-sm leading-relaxed">{errorMsg || "Unknown error occurred."}</p>
                     <button 
                         onClick={() => setView('lobby')}
                         className="px-8 py-3 bg-ios-text text-white rounded-xl font-bold shadow-lg hover:scale-[1.02] active:scale-95 transition-all"
                     >
-                        Return to Lobby
+                        {t.returnLobby}
                     </button>
                 </div>
             )}

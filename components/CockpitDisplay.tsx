@@ -1,34 +1,111 @@
 
 import React, { useEffect, useState } from 'react';
 import { Scenario, FlightPhase } from '../types';
+import { Airport } from '../services/airportService';
 
 interface Props {
   active: boolean;
   scenario: Scenario | null;
   airportCode?: string;
+  airportData?: Airport | null; // Added full airport data
 }
 
-const CockpitDisplay: React.FC<Props> = ({ active, scenario, airportCode = '----' }) => {
+const CockpitDisplay: React.FC<Props> = ({ active, scenario, airportCode = '----', airportData }) => {
   const [elapsed, setElapsed] = useState(0);
 
-  const getCommsData = (phase?: FlightPhase) => {
+  // Helper to find frequency from Airport Data with fallbacks
+  const getCommsData = (phase?: FlightPhase, data?: Airport | null) => {
+      const freqs = data?.frequencies || {};
+      const city = data?.city?.toUpperCase();
+      const code = data?.icao_code || airportCode || '----';
+      
+      // 1. Determine Target Unit Type based on Phase
+      let targetKeys: string[] = [];
+      let defaultFreq = '118.100';
+      let defaultSuffix = 'TOWER';
+
       switch (phase) {
           case 'Ground Ops':
-              return { freq: '121.900', name: 'GROUND' };
+              // Ground > Delivery > Tower
+              targetKeys = ['GND', 'GROUND', 'DEL', 'DELIVERY', 'RAMP'];
+              defaultFreq = '121.900';
+              defaultSuffix = 'GROUND';
+              break;
           case 'Takeoff & Climb':
+              // Tower > Departure
+              targetKeys = ['TWR', 'TOWER', 'DEP', 'DEPARTURE'];
+              defaultFreq = '118.100';
+              defaultSuffix = 'TOWER';
+              break;
           case 'Landing & Taxi in':
-              return { freq: '118.500', name: 'TOWER' };
+              // Tower (Landing) > Ground (Taxi) - Stick to Tower as primary for landing phase
+              targetKeys = ['TWR', 'TOWER'];
+              defaultFreq = '118.100';
+              defaultSuffix = 'TOWER';
+              break;
           case 'Descent & Approach':
           case 'Go-around & Diversion':
-              return { freq: '119.700', name: 'APPROACH' };
+              // Approach > Radar > Arrival
+              targetKeys = ['APP', 'APPROACH', 'ARR', 'ARRIVAL', 'RADAR'];
+              defaultFreq = '119.700';
+              defaultSuffix = 'APPROACH';
+              break;
           case 'Cruise & Enroute':
-              return { freq: '132.800', name: 'CONTROL' };
+              // Control > Center > Radar
+              targetKeys = ['CTR', 'CONTROL', 'CEN', 'CENTER', 'RADAR', 'AREA'];
+              defaultFreq = '132.800';
+              defaultSuffix = 'CONTROL';
+              break;
           default:
-              return { freq: '118.100', name: 'TOWER' };
+              targetKeys = ['TWR', 'TOWER'];
       }
+
+      // 2. Find Actual Frequency from DB
+      let foundFreq: string | null = null;
+      let foundKey: string = '';
+
+      for (const k of targetKeys) {
+          const entry = Object.entries(freqs).find(([dbKey]) => dbKey.toUpperCase().includes(k));
+          if (entry) {
+              foundFreq = entry[1];
+              foundKey = entry[0].toUpperCase();
+              break;
+          }
+      }
+
+      // 3. Determine Final Display Name
+      let displaySuffix = defaultSuffix;
+      
+      if (foundKey) {
+          // Map DB key to standard suffix
+          if (foundKey.includes('DEL')) displaySuffix = 'DELIVERY';
+          else if (foundKey.includes('GND') || foundKey.includes('GROUND')) displaySuffix = 'GROUND';
+          else if (foundKey.includes('TWR') || foundKey.includes('TOWER')) displaySuffix = 'TOWER';
+          else if (foundKey.includes('DEP')) displaySuffix = 'DEPARTURE';
+          else if (foundKey.includes('APP')) displaySuffix = 'APPROACH';
+          else if (foundKey.includes('CTR') || foundKey.includes('CONTROL') || foundKey.includes('CEN')) displaySuffix = 'CONTROL';
+          else if (foundKey.includes('RAD')) displaySuffix = 'RADAR';
+      }
+
+      // Construct Full Name: "BEIJING GROUND" or "ZBAA GROUND"
+      const locationName = city || code;
+      const fullName = `${locationName} ${displaySuffix}`;
+
+      return {
+          freq: foundFreq || defaultFreq,
+          name: fullName
+      };
   };
 
-  const comms = getCommsData(scenario?.phase);
+  const comms = getCommsData(scenario?.phase, airportData);
+
+  // Helper to pick a likely runway for display
+  const getDisplayRunway = () => {
+      if (!airportData?.runways || airportData.runways.length === 0) return 'N/A';
+      // Simple logic: Pick the first one as "Active"
+      // In a real app, wind logic would go here.
+      return airportData.runways[0];
+  };
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -71,15 +148,17 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario, airportCode = '----
         </div>
 
         {/* Bottom: Station Info */}
-        <div className="flex flex-col items-start pl-2">
-            <div className="flex flex-col w-full">
-                <span className="text-xs sm:text-sm font-bold text-ios-text leading-none truncate">{airportCode}</span>
-                <span className="text-[8px] sm:text-[10px] font-bold text-ios-blue uppercase leading-none truncate mt-0.5">{comms.name}</span>
-            </div>
+        <div className="flex flex-col items-start pl-2 overflow-hidden w-full">
+            <span className="text-[10px] sm:text-xs font-black text-ios-blue uppercase leading-tight truncate w-full" title={comms.name}>
+                {comms.name}
+            </span>
+            <span className="text-[8px] sm:text-[9px] font-bold text-gray-400 uppercase leading-none truncate w-full mt-0.5">
+                ACTIVE
+            </span>
         </div>
       </div>
 
-      {/* --- Right Card: FLIGHT DATA (Wider: col-span-8, No Situation) --- */}
+      {/* --- Right Card: FLIGHT DATA (Wider: col-span-8) --- */}
       <div className="col-span-8 bg-ios-surface/90 backdrop-blur-xl rounded-2xl p-3 sm:p-4 flex flex-col justify-between border border-ios-border shadow-soft relative overflow-hidden">
          {scenario ? (
              <>
@@ -91,10 +170,16 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario, airportCode = '----
                             {formatTime(elapsed)}
                         </span>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex flex-col items-end">
                         <span className="inline-block px-2 py-1 rounded-md bg-gray-100 text-[10px] font-bold text-gray-600 uppercase tracking-tight truncate max-w-[140px] border border-gray-200">
                             {scenario.phase || 'PRE-FLIGHT'}
                         </span>
+                        {/* Runway Info */}
+                        {airportData && (
+                            <span className="text-[9px] font-mono font-bold text-gray-400 mt-1 uppercase">
+                                Active: {getDisplayRunway()}
+                            </span>
+                        )}
                     </div>
                 </div>
 

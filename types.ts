@@ -8,12 +8,15 @@ export enum ConnectionStatus {
   ERROR = 'ERROR'
 }
 
+export type AppLanguage = 'cn' | 'en';
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'ai';
   text: string;
   isPartial?: boolean;
   isHint?: boolean;
+  baseText?: string; // New field to store committed text when merging turns
 }
 
 export type FlightPhase = 
