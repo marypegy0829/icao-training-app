@@ -85,6 +85,9 @@ export class LiveClient {
   private isInputMuted = false;
   private audioBufferQueue: Float32Array[] = [];
   
+  // Power Saving
+  private suspendTimer: any = null;
+  
   private callbacks: LiveClientCallbacks | null = null;
 
   constructor() {
@@ -437,13 +440,10 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
             if (this.isInputMuted && !this.isRecording) {
                 return; // Drop data
             }
-            
-            const normalizedData = normalizeAudio(inputData);
-            const pcmBlob = createPcmBlob(normalizedData);
 
-            this.sessionPromise?.then((session) => {
-                session.sendRealtimeInput({ media: pcmBlob });
-            });
+            // REVERTED VAD OPTIMIZATION: Send data continuously if not muted
+            // This ensures no speech is cut off due to aggressive silence detection thresholds
+            this.sendRealtimeInput(inputData);
         };
 
         this.inputSource.connect(this.processor);
@@ -453,6 +453,15 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
         console.error("Microphone initialization failed", e);
         this.callbacks?.onError(e as Error);
     }
+  }
+
+  private sendRealtimeInput(data: Float32Array) {
+      const normalizedData = normalizeAudio(data);
+      const pcmBlob = createPcmBlob(normalizedData);
+
+      this.sessionPromise?.then((session) => {
+          session.sendRealtimeInput({ media: pcmBlob });
+      });
   }
 
   private async playAudio(base64Data: string) {
@@ -482,19 +491,27 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
   }
 
   async startRecording() {
+      // Clear suspension timer if active
+      if (this.suspendTimer) {
+          clearTimeout(this.suspendTimer);
+          this.suspendTimer = null;
+      }
+
+      // Resume AudioContext if suspended (Power Saving)
+      if (this.inputAudioContext && this.inputAudioContext.state === 'suspended') {
+          try {
+              await this.inputAudioContext.resume();
+              console.log("AudioContext Resumed");
+          } catch (e) {
+              console.warn("Failed to resume input context:", e);
+          }
+      }
+
       if (this.isBufferedMode) {
           this.isRecording = true;
           this.audioBufferQueue = []; 
       } else {
           this.setInputMuted(false);
-      }
-
-      if (this.inputAudioContext && this.inputAudioContext.state === 'suspended') {
-          try {
-              await this.inputAudioContext.resume();
-          } catch (e) {
-              console.warn("Failed to resume input context:", e);
-          }
       }
   }
 
@@ -503,6 +520,21 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
           this.isRecording = false;
       } else {
           this.setInputMuted(true);
+      }
+
+      // Schedule AudioContext suspension to save CPU/Battery
+      if (this.inputAudioContext && this.inputAudioContext.state === 'running') {
+          this.suspendTimer = setTimeout(async () => {
+              // Double check status before suspending
+              if (!this.isRecording && this.inputAudioContext?.state === 'running') {
+                  try {
+                      await this.inputAudioContext.suspend();
+                      console.log("AudioContext Suspended (Power Saving)");
+                  } catch (e) {
+                      console.warn("Failed to suspend input context:", e);
+                  }
+              }
+          }, 5000); // Suspend after 5 seconds of silence
       }
   }
 
@@ -525,6 +557,8 @@ DO NOT speak like a generic AI robot. Be human, busy, and professional.
   }
 
   disconnect() {
+      if (this.suspendTimer) clearTimeout(this.suspendTimer);
+      
       if (this.processor) {
           this.processor.disconnect();
           this.processor = null;

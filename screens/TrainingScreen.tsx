@@ -63,7 +63,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   // Session State
   const [activeScenario, setActiveScenario] = useState<Scenario | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
-  const [isPaused, setIsPaused] = useState(false); // NEW: Pause State
+  const [isPaused, setIsPaused] = useState(false); 
+  const [autoPaused, setAutoPaused] = useState(false); // NEW: Track if paused automatically
   
   // Track status in ref to avoid closure staleness
   const statusRef = useRef<ConnectionStatus>(status);
@@ -164,22 +165,23 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     return () => clearTimeout(timeoutId);
   }, [status]);
 
-  // --- Auto-Close on Inactivity Logic ---
+  // --- Auto-Pause on Inactivity Logic ---
   useEffect(() => {
       if (status !== ConnectionStatus.CONNECTED) return;
-      if (isPaused) return; // FIX: Do not auto-close if manually paused
+      if (isPaused) return; 
 
       const checkInterval = setInterval(() => {
           const timeSinceLastInput = Date.now() - lastInputTimeRef.current;
-          // 2 minutes = 120,000 ms
-          if (timeSinceLastInput > 120000) {
-              console.log("Auto-closing session due to inactivity.");
-              handleStop(true); // Pass flag for inactivity
+          // Optimization B: Aggressive Auto-Pause after 45 seconds
+          if (timeSinceLastInput > 45000) { 
+              console.log("Auto-pausing session due to inactivity (45s).");
+              togglePause();
+              setAutoPaused(true);
           }
       }, 5000); // Check every 5 seconds
 
       return () => clearInterval(checkInterval);
-  }, [status, isPaused]); // Added isPaused dependency
+  }, [status, isPaused]); 
 
 
   // --- Actions ---
@@ -195,6 +197,11 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
       
       const newState = !isPaused;
       setIsPaused(newState);
+      if (!newState) {
+          // If resuming, clear auto-pause flag
+          setAutoPaused(false);
+          lastInputTimeRef.current = Date.now(); // Reset timer on resume
+      }
       
       if (liveClientRef.current) {
           liveClientRef.current.setInputMuted(newState);
@@ -249,6 +256,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     setView('session');
     setStatus(ConnectionStatus.CONNECTING);
     setIsPaused(false); // Reset Pause State
+    setAutoPaused(false);
     
     // Don't clear messages on reconnect if it's a resume-like action
     if (status !== ConnectionStatus.ERROR) {
@@ -388,11 +396,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   };
 
   const handleStop = async (dueToInactivity = false) => {
-      if (dueToInactivity) {
-          alert("检测到长时间未发言，训练已自动结束。\nSession ended due to inactivity (2 mins).");
-      }
-
-      // If just paused, unmute first? Doesn't matter for finalize.
+      // Logic removed here for inactivity since we pause now.
       
       if (liveClientRef.current && status === ConnectionStatus.CONNECTED) {
           setStatus(ConnectionStatus.ANALYZING);
@@ -430,7 +434,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
       finish: language === 'cn' ? '结束训练' : 'Finish',
       pause: language === 'cn' ? '暂停' : 'Pause',
       resume: language === 'cn' ? '继续' : 'Resume',
-      stop: language === 'cn' ? '停止' : 'Stop',
+      stop: language === 'cn' ? '结束' : 'Stop',
       brief: language === 'cn' ? '情景简报' : 'Situation Brief',
       liveTranscript: language === 'cn' ? '实时对话' : 'Live Transcript (ATC Only)',
       aiHint: language === 'cn' ? 'AI 提示' : 'AI Hint',
@@ -439,8 +443,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
       connectFail: language === 'cn' ? '连接失败' : 'Connection Failed',
       returnHome: language === 'cn' ? '返回主页' : 'Return Home',
       resumeSession: language === 'cn' ? '恢复会话' : 'Resume Session',
-      openMic: language === 'cn' ? '麦克风已开启 - 2分钟无声自动结束' : 'Open Mic Active - Auto Close in 2m inactive',
+      openMic: language === 'cn' ? '麦克风已开启 - 45秒无声自动暂停' : 'Open Mic Active - Auto Pause in 45s inactive',
       pausedText: language === 'cn' ? '已暂停 - 点击继续恢复训练' : 'PAUSED - Click Resume to continue',
+      autoPaused: language === 'cn' ? '已自动暂停 (节能模式)' : 'Auto-Paused (Power Saving)',
       connecting: language === 'cn' ? '连接中...' : 'Connecting...'
   };
 
@@ -743,7 +748,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
         
         {/* Header - Fixed Height with increased Top Padding for layout adjustment */}
         <div className="pt-14 px-6 pb-2 flex justify-between items-center z-10 shrink-0 h-24">
-            <div className="flex items-center space-x-3 max-w-[55%]">
+            <div className="flex items-center space-x-3 w-full">
                 {/* Status Indicator */}
                 <div className="flex items-center space-x-2 bg-white/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/60 shadow-sm shrink-0">
                     <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-green-500 animate-pulse'}`}></div>
@@ -752,40 +757,10 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                     </span>
                 </div>
                 {/* Scenario Title */}
-                <h1 className="text-sm font-bold text-ios-text truncate opacity-80 hidden sm:block">{activeScenario?.title}</h1>
+                <h1 className="text-sm font-bold text-ios-text truncate opacity-80">{activeScenario?.title}</h1>
             </div>
             
-            {/* Control Buttons - Top Right */}
-            <div className="flex items-center space-x-2">
-                <button 
-                    onClick={togglePause}
-                    disabled={status !== ConnectionStatus.CONNECTED}
-                    className={`
-                        flex items-center space-x-1 px-3 py-2 rounded-full text-xs font-bold shadow-sm transition-all
-                        ${isPaused 
-                            ? 'bg-yellow-100 text-yellow-700 border border-yellow-200 hover:bg-yellow-200' 
-                            : 'bg-white/80 backdrop-blur-md text-gray-600 border border-gray-200 hover:bg-gray-100'}
-                    `}
-                >
-                    {isPaused ? (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    ) : (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    )}
-                    <span className="uppercase tracking-wide hidden sm:inline">{isPaused ? t.resume : t.pause}</span>
-                </button>
-
-                <button 
-                    onClick={() => handleStop()}
-                    disabled={status === ConnectionStatus.ANALYZING}
-                    className="bg-white/80 backdrop-blur-md text-ios-red border border-red-100 px-3 py-2 rounded-full text-xs font-bold shadow-sm hover:bg-red-50 active:scale-95 transition-all flex items-center space-x-1"
-                >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9h6v6H9z" />
-                    </svg>
-                    <span className="uppercase tracking-wide hidden sm:inline">{t.stop}</span>
-                </button>
-            </div>
+            {/* Control Buttons REMOVED from Header as requested */}
         </div>
 
         {/* Main Layout Container - Takes remaining height, Absolute Positioning for robustness */}
@@ -864,14 +839,57 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                         </div>
                     </div>
                     
-                    {/* C. STATUS BAR (Fixed Bottom of Card) */}
-                    <div className="px-6 py-2 bg-white/50 border-t border-white/50 text-center shrink-0">
-                        <span className="text-[9px] font-bold text-gray-400 animate-pulse uppercase tracking-wider flex items-center justify-center">
-                            <span className={`w-1.5 h-1.5 rounded-full mr-2 ${status === ConnectionStatus.CONNECTED && !isPaused ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
-                            {status === ConnectionStatus.CONNECTED 
-                                ? (isPaused ? t.pausedText : t.openMic) 
-                                : t.connecting}
-                        </span>
+                    {/* C. CONTROL DECK (Fixed Bottom of Card) */}
+                    <div className="px-4 py-3 bg-white/90 border-t border-white/60 shrink-0 backdrop-blur-xl z-20 pb-safe">
+                        
+                        {/* 1. Status Text Row */}
+                        <div className="flex justify-center items-center mb-3">
+                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider flex items-center justify-center">
+                                <span className={`w-1.5 h-1.5 rounded-full mr-2 ${status === ConnectionStatus.CONNECTED && !isPaused ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
+                                {status === ConnectionStatus.CONNECTED 
+                                    ? (autoPaused ? t.autoPaused : (isPaused ? t.pausedText : t.openMic)) 
+                                    : t.connecting}
+                            </span>
+                        </div>
+
+                        {/* 2. Control Buttons Row */}
+                        <div className="grid grid-cols-2 gap-3">
+                            {/* Pause/Resume Button */}
+                            <button 
+                                onClick={togglePause}
+                                disabled={status !== ConnectionStatus.CONNECTED}
+                                className={`
+                                    flex items-center justify-center space-x-2 h-11 rounded-xl font-bold text-sm shadow-sm transition-all active:scale-95 border
+                                    ${isPaused 
+                                        ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' // Resume Look
+                                        : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'} // Pause Look
+                                `}
+                            >
+                                {isPaused ? (
+                                    <>
+                                        <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                        <span>{t.resume}</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                                        <span>{t.pause}</span>
+                                    </>
+                                )}
+                            </button>
+
+                            {/* Stop/Finish Button */}
+                            <button 
+                                onClick={() => handleStop()}
+                                disabled={status === ConnectionStatus.ANALYZING}
+                                className="flex items-center justify-center space-x-2 h-11 rounded-xl bg-red-50 text-red-600 border border-red-100 font-bold text-sm shadow-sm hover:bg-red-100 active:scale-95 transition-all"
+                            >
+                                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                                    <path d="M6 6h12v12H6z" />
+                                </svg>
+                                <span>{t.stop}</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

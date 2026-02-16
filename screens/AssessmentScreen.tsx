@@ -25,6 +25,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     // Flow State
     const [view, setView] = useState<'lobby' | 'briefing' | 'exam' | 'report'>('lobby');
     const [showHistory, setShowHistory] = useState(false);
+    const [isTimeout, setIsTimeout] = useState(false); // NEW: Timeout State
     
     // Data State
     const [scenario, setScenario] = useState<Scenario | null>(null);
@@ -39,6 +40,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     const liveClientRef = useRef<LiveClient | null>(null);
     const startTimeRef = useRef<number>(0);
     
+    // Inactivity Tracking (3 Minutes Rule)
+    const lastActivityRef = useRef<number>(0);
+    
     // PTT State
     const [isTransmitting, setIsTransmitting] = useState(false);
     const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -52,6 +56,34 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             handleAbort(); 
         };
     }, []);
+
+    // 3-Minute Inactivity Timer Hook
+    useEffect(() => {
+        if (status !== ConnectionStatus.CONNECTED) return;
+
+        const checkInterval = setInterval(() => {
+            const idleTime = Date.now() - lastActivityRef.current;
+            // 3 minutes = 180,000 ms
+            if (idleTime > 180000) {
+                console.log("Assessment Session Timed Out due to inactivity.");
+                handleTimeoutDisconnect();
+            }
+        }, 5000); // Check every 5 seconds
+
+        return () => clearInterval(checkInterval);
+    }, [status]);
+
+    const updateActivity = () => {
+        lastActivityRef.current = Date.now();
+    };
+
+    const handleTimeoutDisconnect = () => {
+        if (liveClientRef.current) {
+            liveClientRef.current.disconnect();
+        }
+        setStatus(ConnectionStatus.DISCONNECTED);
+        setIsTimeout(true);
+    };
 
     const startNewAssessmentProcess = async () => {
         const randomScenario = await scenarioService.getRandomAssessmentScenario();
@@ -78,7 +110,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         setMessages([]);
         setAssessment(null);
         setErrorMsg(null);
+        setIsTimeout(false); // Reset timeout state
         startTimeRef.current = Date.now();
+        lastActivityRef.current = Date.now(); // Reset Activity Timer
 
         // Initialize LiveClient
         liveClientRef.current = new LiveClient();
@@ -117,6 +151,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 onOpen: () => {
                     setStatus(ConnectionStatus.CONNECTED);
                     startTimeRef.current = Date.now();
+                    updateActivity();
                 },
                 onClose: () => {
                    if (status !== ConnectionStatus.ANALYZING && status !== ConnectionStatus.ERROR) {
@@ -128,8 +163,12 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     setErrorMsg(err.message);
                 },
                 onAudioData: (level) => setAudioLevel(level),
-                onTurnComplete: () => setAudioLevel(0),
+                onTurnComplete: () => {
+                    setAudioLevel(0);
+                    updateActivity();
+                },
                 onTranscript: (text, role, isPartial) => {
+                    updateActivity(); // User speaking or AI responding counts as activity
                     setMessages(prev => {
                         const lastMsg = prev[prev.length - 1];
                         if (role === 'user') {
@@ -185,6 +224,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         liveClientRef.current?.disconnect();
         setStatus(ConnectionStatus.DISCONNECTED);
         setView('lobby');
+        setIsTimeout(false);
     };
 
     const handleFinishManually = async () => {
@@ -196,6 +236,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
 
     // PTT Logic Wrapper
     const engagePtt = () => {
+        updateActivity(); // Reset inactivity timer
         if (status === ConnectionStatus.CONNECTED) {
             if (pttTimeoutRef.current) {
                 clearTimeout(pttTimeoutRef.current);
@@ -240,7 +281,12 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         transmitting: language === 'cn' ? '正在发送...' : 'Transmitting',
         holdToSpeak: language === 'cn' ? '按住说话' : 'Hold to Speak',
         connectionError: language === 'cn' ? '连接错误' : 'Connection Error',
-        returnLobby: language === 'cn' ? '返回大厅' : 'Return to Lobby'
+        returnLobby: language === 'cn' ? '返回大厅' : 'Return to Lobby',
+        // NEW KEYS
+        timeoutTitle: language === 'cn' ? '会话超时' : 'Session Timed Out',
+        timeoutDesc: language === 'cn' ? '您已超过3分钟未活动，连接已断开以节省资源。' : 'Disconnected due to inactivity (3 mins).',
+        refresh: language === 'cn' ? '重新开始' : 'Restart',
+        standby: language === 'cn' ? '待机中 (省电模式)' : 'Standby (Power Save)'
     };
 
     // --- RENDERERS ---
@@ -336,6 +382,25 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             {/* Dynamic Backgrounds */}
             <div className="absolute top-[-10%] left-[-20%] w-[600px] h-[600px] bg-purple-100/60 rounded-full blur-[100px] animate-blob mix-blend-multiply pointer-events-none"></div>
             <div className="absolute bottom-[-10%] right-[-20%] w-[500px] h-[500px] bg-blue-100/60 rounded-full blur-[100px] animate-blob animation-delay-2000 mix-blend-multiply pointer-events-none"></div>
+
+            {/* Timeout Overlay */}
+            {isTimeout && (
+                <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+                    <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                        <svg className="w-10 h-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">{t.timeoutTitle}</h2>
+                    <p className="text-gray-500 mb-8 max-w-xs">{t.timeoutDesc}</p>
+                    <button 
+                        onClick={handleAbort}
+                        className="px-8 py-3 bg-ios-text text-white rounded-xl font-bold shadow-lg hover:scale-105 transition-all"
+                    >
+                        {t.refresh}
+                    </button>
+                </div>
+            )}
 
             {/* Status Overlay (Loading) */}
             {status === ConnectionStatus.ANALYZING && (
@@ -446,7 +511,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                                  {isTransmitting ? t.transmitting : t.ptt}
                              </span>
                              <span className={`text-[10px] font-medium transition-colors ${isTransmitting ? 'text-white/80' : 'text-gray-400'}`}>
-                                 {t.holdToSpeak}
+                                 {isTransmitting ? t.holdToSpeak : t.standby}
                              </span>
                          </div>
                      </div>
