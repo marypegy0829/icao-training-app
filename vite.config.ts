@@ -12,9 +12,12 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, process.cwd(), '');
     
     // SECURITY: API Key Configuration
-    // We map VITE_GEMINI_API_KEY to process.env.API_KEY for the GenAI SDK
     const googleApiKey = env.VITE_GEMINI_API_KEY || env.GEMINI_API_KEY || env.API_KEY || '';
     
+    // Supabase Configuration
+    const supabaseUrl = env.VITE_SUPABASE_URL || '';
+    const supabaseKey = env.VITE_SUPABASE_KEY || '';
+
     return {
       server: {
         port: 3000,
@@ -23,10 +26,12 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       define: {
         // Securely inject env vars at build time. 
-        // We only explicitly define API_KEY to map it from VITE_ names.
-        // VITE_* variables are automatically available on import.meta.env
+        // We explicitly define these to ensure they are replaced by string literals during build,
+        // preventing "undefined is not an object" errors at runtime.
         'process.env.API_KEY': JSON.stringify(googleApiKey),
         'process.env.GEMINI_API_KEY': JSON.stringify(googleApiKey),
+        'process.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
+        'process.env.VITE_SUPABASE_KEY': JSON.stringify(supabaseKey),
       },
       resolve: {
         alias: {
