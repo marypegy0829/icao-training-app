@@ -66,6 +66,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
   const [isPaused, setIsPaused] = useState(false); 
   const [autoPaused, setAutoPaused] = useState(false); // NEW: Track if paused automatically
+  const [showExitDialog, setShowExitDialog] = useState(false); // NEW: Exit Dialog
   
   // Track status in ref to avoid closure staleness
   const statusRef = useRef<ConnectionStatus>(status);
@@ -309,6 +310,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     setStatus(ConnectionStatus.CONNECTING);
     setIsPaused(false); // Reset Pause State
     setAutoPaused(false);
+    setShowExitDialog(false); // Reset Exit Dialog
     
     // Don't clear messages on reconnect if it's a resume-like action
     if (status !== ConnectionStatus.ERROR) {
@@ -410,20 +412,38 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           if (role === 'user') {
               lastInputTimeRef.current = Date.now();
               isAiTurnStart = true; // User spoke, so next AI response is new turn
-              return; // Do not display user messages in transcript
+              // FIXED: Removed early return to allow user text to show in transcript
           }
 
-          if (role === 'ai') {
-              // Determine if we should start a new message (bubble) or append to the last one
-              const shouldCreateNew = isAiTurnStart;
-              
-              // If we are starting a new message, flip the flag immediately so subsequent chunks append
-              if (shouldCreateNew) {
-                  isAiTurnStart = false;
-              }
+          setMessages(prev => {
+            const lastMsg = prev[prev.length - 1];
+            
+            // --- USER MESSAGE LOGIC ---
+            if (role === 'user') {
+                if (lastMsg && lastMsg.role === 'user' && lastMsg.isPartial) {
+                    // Update existing partial message
+                    const newMsgs = [...prev];
+                    newMsgs[newMsgs.length - 1] = { ...lastMsg, text, isPartial };
+                    // If finished and empty, don't keep it (unless it had content)
+                    if (!isPartial && !text.trim()) return prev;
+                    return newMsgs;
+                } else if (text.trim()) {
+                    // Start new message
+                    return [...prev, { id: Date.now().toString(), role, text, isPartial }];
+                }
+                return prev;
+            }
 
-              setMessages(prev => {
-                const lastMsg = prev[prev.length - 1];
+            // --- AI MESSAGE LOGIC ---
+            if (role === 'ai') {
+                // Determine if we should start a new message (bubble) or append to the last one
+                const shouldCreateNew = isAiTurnStart;
+                
+                // If we are starting a new message, flip the flag immediately so subsequent chunks append
+                if (shouldCreateNew) {
+                    isAiTurnStart = false;
+                }
+
                 // Check for Coach Hint prefix
                 const isHint = text.includes("💡 COACH:");
                 
@@ -441,8 +461,9 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                         return [...prev, { id: Date.now().toString(), role, text, isHint }];
                     }
                 }
-              });
-          }
+            }
+            return prev;
+          });
       },
       onAssessment: (data) => {
           if (currentSessionIdRef.current !== sessionId) return; // GUARD
@@ -455,18 +476,36 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     }, difficulty, sessionAirportCode, accentEnabled, cockpitNoise, coachingInstruction, dynamicRules, language);
   };
 
-  const handleStop = async (dueToInactivity = false) => {
-      // Logic removed here for inactivity since we pause now.
+  // --- EXIT LOGIC ---
+
+  // 1. FAST EXIT: Quit without report
+  const handleQuitNow = () => {
+      setShowExitDialog(false);
+      // Force clean disconnect
+      if (liveClientRef.current) {
+          liveClientRef.current.disconnect();
+          liveClientRef.current = null;
+      }
+      
+      // Save basic session log (duration only) if actually connected
+      if (statusRef.current === ConnectionStatus.CONNECTED || statusRef.current === ConnectionStatus.ANALYZING) {
+           saveToSupabase(null, activeScenario);
+      }
+      
+      setStatus(ConnectionStatus.DISCONNECTED);
+      setView('dashboard');
+  };
+
+  // 2. SLOW EXIT: Finish with AI Report
+  const handleFinishWithReport = async () => {
+      setShowExitDialog(false);
       
       if (liveClientRef.current && status === ConnectionStatus.CONNECTED) {
           setStatus(ConnectionStatus.ANALYZING);
-          await liveClientRef.current.finalize();
+          await liveClientRef.current.finalize(); // Triggers AI tool call -> onAssessment -> saveToSupabase
       } else {
-          if (status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING) {
-              // Pass activeScenario here because handleStop is called on current render
-              saveToSupabase(null, activeScenario);
-          }
-          setView('dashboard');
+          // Fallback if disconnected
+          handleQuitNow();
       }
   };
 
@@ -494,7 +533,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
       finish: language === 'cn' ? '结束训练' : 'Finish',
       pause: language === 'cn' ? '暂停' : 'Pause',
       resume: language === 'cn' ? '继续' : 'Resume',
-      stop: language === 'cn' ? '结束' : 'Stop',
+      endSession: language === 'cn' ? '结束' : 'End', // Shortened
       brief: language === 'cn' ? '情景简报' : 'Situation Brief',
       liveTranscript: language === 'cn' ? '实时对话' : 'Live Transcript (ATC Only)',
       aiHint: language === 'cn' ? 'AI 提示' : 'AI Hint',
@@ -503,10 +542,16 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
       connectFail: language === 'cn' ? '连接失败' : 'Connection Failed',
       returnHome: language === 'cn' ? '返回主页' : 'Return Home',
       resumeSession: language === 'cn' ? '恢复会话' : 'Resume Session',
-      openMic: language === 'cn' ? '麦克风已开启 - 45秒无声自动暂停' : 'Open Mic Active - Auto Pause in 45s inactive',
-      pausedText: language === 'cn' ? '已暂停 - 点击继续恢复训练' : 'PAUSED - Click Resume to continue',
-      autoPaused: language === 'cn' ? '已自动暂停 (节能模式)' : 'Auto-Paused (Power Saving)',
-      connecting: language === 'cn' ? '连接中...' : 'Connecting...'
+      openMic: language === 'cn' ? '麦克风已开启' : 'Mic Active', // Shortened
+      pausedText: language === 'cn' ? '已暂停' : 'Paused',
+      autoPaused: language === 'cn' ? '已自动暂停' : 'Auto-Paused',
+      connecting: language === 'cn' ? '连接中...' : 'Connecting...',
+      // Exit Dialog Translations
+      quitConfirmTitle: language === 'cn' ? '结束本次训练?' : 'End Session?',
+      quitConfirmDesc: language === 'cn' ? '您可以选择生成详细评估报告（需等待 AI 分析），或直接退出。' : 'Generate a detailed report (waits for AI) or just quit.',
+      quitBtn: language === 'cn' ? '直接退出 (Quit)' : 'Quit (No Report)',
+      reportBtn: language === 'cn' ? '生成报告 (Finish & Report)' : 'Finish & Report',
+      cancel: language === 'cn' ? '取消' : 'Cancel',
   };
 
   // --- Renders ---
@@ -784,6 +829,43 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           </div>
         )}
 
+        {/* Exit Confirmation Dialog */}
+        {showExitDialog && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 flex flex-col items-center text-center">
+                    <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500">
+                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">{t.quitConfirmTitle}</h3>
+                    <p className="text-sm text-gray-500 mb-6 leading-relaxed">{t.quitConfirmDesc}</p>
+                    
+                    <div className="w-full space-y-3">
+                        <button 
+                            onClick={handleFinishWithReport}
+                            className="w-full py-3 bg-ios-blue text-white rounded-xl font-bold shadow-lg hover:shadow-blue-200 active:scale-95 transition-all flex items-center justify-center"
+                        >
+                            <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            {t.reportBtn}
+                        </button>
+                        
+                        <button 
+                            onClick={handleQuitNow}
+                            className="w-full py-3 bg-white border border-gray-200 text-red-500 font-bold rounded-xl hover:bg-gray-50 active:scale-95 transition-all"
+                        >
+                            {t.quitBtn}
+                        </button>
+
+                        <button 
+                            onClick={() => setShowExitDialog(false)}
+                            className="w-full py-2 text-gray-400 text-xs font-semibold mt-2"
+                        >
+                            {t.cancel}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* Error Overlay */}
         {status === ConnectionStatus.ERROR && errorMsg && (
             <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
@@ -809,25 +891,16 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
         {/* Header - Fixed Height with increased Top Padding for layout adjustment */}
         <div className="pt-14 px-6 pb-2 flex justify-between items-center z-10 shrink-0 h-24">
             <div className="flex items-center space-x-3 w-full">
-                {/* Status Indicator */}
-                <div className="flex items-center space-x-2 bg-white/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/60 shadow-sm shrink-0">
-                    <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-yellow-500' : 'bg-green-500 animate-pulse'}`}></div>
-                    <span className="text-[10px] font-bold text-gray-700 uppercase tracking-widest truncate">
-                        {isPaused ? 'PAUSED' : 'LIVE'}
-                    </span>
-                </div>
                 {/* Scenario Title */}
                 <h1 className="text-sm font-bold text-ios-text truncate opacity-80">{activeScenario?.title}</h1>
             </div>
-            
-            {/* Control Buttons REMOVED from Header as requested */}
         </div>
 
         {/* Main Layout Container - Takes remaining height, Absolute Positioning for robustness */}
         <div className="flex-1 relative z-10 w-full overflow-hidden">
             
-            {/* 1. TOP SECTION (45% of space) - Absolute Top */}
-            <div className="absolute top-0 left-0 right-0 h-[45%] flex flex-col items-center justify-end pb-6 px-4 space-y-6">
+            {/* 1. TOP SECTION (35% of space) - Reduced to give more room to text */}
+            <div className="absolute top-0 left-0 right-0 h-[35%] flex flex-col items-center justify-end pb-4 px-4 space-y-4">
                 {/* Visualizer (Takes available space in this section) */}
                 <div className="flex-1 w-full flex items-center justify-center overflow-visible min-h-0 relative">
                     <div className="scale-[0.8] transform transition-transform">
@@ -846,21 +919,73 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                 </div>
             </div>
 
-            {/* 2. BOTTOM SECTION (55% of space) - Absolute Fixed at Bottom */}
-            <div className="absolute bottom-0 left-0 right-0 h-[55%] px-4">
+            {/* 2. BOTTOM SECTION (65% of space) - Extended to maximum */}
+            <div className="absolute bottom-0 left-0 right-0 top-[35%] px-4 pb-0">
                 {/* Card Container: Rounded Top, Flat Bottom, Full Height */}
-                <div className="w-full h-full bg-white/70 backdrop-blur-xl border-t border-x border-white/60 rounded-t-[2.5rem] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
+                <div className="w-full h-full bg-white/70 backdrop-blur-xl border-t border-x border-white/60 rounded-t-[2rem] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
                     
-                    {/* A. SITUATION BRIEF HEADER (Fixed Top of Card) */}
-                    <div className="p-4 border-b border-white/50 shrink-0 bg-white/30 backdrop-blur-sm">
-                        <div className="flex items-center space-x-2 mb-2 opacity-80">
-                            <div className="w-5 h-5 rounded-full bg-ios-blue/10 flex items-center justify-center text-ios-blue">
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
+                    {/* A. HEADER: Situation Brief & Controls */}
+                    <div className="p-4 border-b border-white/50 shrink-0 bg-white/30 backdrop-blur-sm flex flex-col gap-3">
+                        {/* Top Row: Title + Controls */}
+                        <div className="flex justify-between items-center">
+                            {/* Left: Title & Status */}
+                            <div className="flex items-center space-x-3 flex-1 min-w-0 pr-2">
+                                <div className="w-8 h-8 rounded-full bg-ios-blue/10 flex items-center justify-center text-ios-blue shrink-0">
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                                <div className="min-w-0">
+                                    <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest block truncate">{t.brief}</span>
+                                    {/* Compact Status Indicator */}
+                                    <span className="text-[9px] font-bold text-gray-400 flex items-center truncate">
+                                        <span className={`w-1.5 h-1.5 rounded-full mr-1 shrink-0 ${status === ConnectionStatus.CONNECTED && !isPaused ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></span>
+                                        {status === ConnectionStatus.CONNECTED 
+                                            ? (autoPaused ? t.autoPaused : (isPaused ? t.pausedText : t.openMic)) 
+                                            : t.connecting}
+                                    </span>
+                                </div>
                             </div>
-                            <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest">{t.brief}</span>
+
+                            {/* Right: Controls (Wide & Visible) */}
+                            <div className="flex items-center space-x-2 shrink-0">
+                                {/* Pause/Resume Button */}
+                                <button 
+                                    onClick={togglePause}
+                                    disabled={status !== ConnectionStatus.CONNECTED}
+                                    className={`
+                                        flex items-center justify-center space-x-1.5 px-5 py-2 rounded-xl font-bold text-xs shadow-md transition-all active:scale-95 min-w-[100px]
+                                        ${isPaused 
+                                            ? 'bg-gradient-to-br from-green-400 to-green-600 text-white shadow-green-200 hover:shadow-lg' // Resume Look (Green)
+                                            : 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-orange-200 hover:shadow-lg'} // Pause Look (Amber)
+                                    `}
+                                >
+                                    {isPaused ? (
+                                        <>
+                                            <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                            <span>{t.resume}</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+                                            <span>{t.pause}</span>
+                                        </>
+                                    )}
+                                </button>
+
+                                {/* End Session Button */}
+                                <button 
+                                    onClick={() => setShowExitDialog(true)}
+                                    disabled={status === ConnectionStatus.ANALYZING}
+                                    className="flex items-center justify-center space-x-1.5 px-5 py-2 rounded-xl bg-gradient-to-br from-red-500 to-rose-600 text-white font-bold text-xs shadow-md shadow-red-200 hover:shadow-lg active:scale-95 transition-all min-w-[100px]"
+                                >
+                                    <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M6 6h12v12H6z" /></svg>
+                                    <span>{t.endSession}</span>
+                                </button>
+                            </div>
                         </div>
+
+                        {/* Detail Text */}
                         <div className="max-h-[60px] overflow-y-auto custom-scrollbar">
                             <p className="text-sm text-gray-700 leading-relaxed font-medium text-justify">
                                 {activeScenario?.details || "No details available."}
@@ -868,10 +993,10 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                         </div>
                     </div>
 
-                    {/* B. TRANSCRIPT (Scrollable Area) */}
+                    {/* B. TRANSCRIPT (Maximized Area) */}
                     <div className="flex-1 flex flex-col min-h-0 relative bg-white/30">
                         {/* Transcript Header */}
-                        <div className="flex justify-between items-center px-4 py-2 shrink-0">
+                        <div className="flex justify-between items-center px-3 py-2 shrink-0 border-b border-gray-100/50">
                             <div className="flex items-center space-x-2 opacity-80">
                                 <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center text-green-600">
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -899,58 +1024,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                         </div>
                     </div>
                     
-                    {/* C. CONTROL DECK (Fixed Bottom of Card) */}
-                    <div className="px-4 py-3 bg-white/90 border-t border-white/60 shrink-0 backdrop-blur-xl z-20 pb-safe">
-                        
-                        {/* 1. Status Text Row */}
-                        <div className="flex justify-center items-center mb-3">
-                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider flex items-center justify-center">
-                                <span className={`w-1.5 h-1.5 rounded-full mr-2 ${status === ConnectionStatus.CONNECTED && !isPaused ? 'bg-green-500' : 'bg-yellow-500'}`}></span>
-                                {status === ConnectionStatus.CONNECTED 
-                                    ? (autoPaused ? t.autoPaused : (isPaused ? t.pausedText : t.openMic)) 
-                                    : t.connecting}
-                            </span>
-                        </div>
-
-                        {/* 2. Control Buttons Row */}
-                        <div className="grid grid-cols-2 gap-3">
-                            {/* Pause/Resume Button */}
-                            <button 
-                                onClick={togglePause}
-                                disabled={status !== ConnectionStatus.CONNECTED}
-                                className={`
-                                    flex items-center justify-center space-x-2 h-11 rounded-xl font-bold text-sm shadow-sm transition-all active:scale-95 border
-                                    ${isPaused 
-                                        ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' // Resume Look
-                                        : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'} // Pause Look
-                                `}
-                            >
-                                {isPaused ? (
-                                    <>
-                                        <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                                        <span>{t.resume}</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-                                        <span>{t.pause}</span>
-                                    </>
-                                )}
-                            </button>
-
-                            {/* Stop/Finish Button */}
-                            <button 
-                                onClick={() => handleStop()}
-                                disabled={status === ConnectionStatus.ANALYZING}
-                                className="flex items-center justify-center space-x-2 h-11 rounded-xl bg-red-50 text-red-600 border border-red-100 font-bold text-sm shadow-sm hover:bg-red-100 active:scale-95 transition-all"
-                            >
-                                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                                    <path d="M6 6h12v12H6z" />
-                                </svg>
-                                <span>{t.stop}</span>
-                            </button>
-                        </div>
-                    </div>
+                    {/* C. FOOTER REMOVED - Controls are now in Header */}
                 </div>
             </div>
         </div>

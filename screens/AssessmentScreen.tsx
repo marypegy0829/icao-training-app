@@ -27,6 +27,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     const [view, setView] = useState<'lobby' | 'briefing' | 'exam' | 'report'>('lobby');
     const [showHistory, setShowHistory] = useState(false);
     const [isTimeout, setIsTimeout] = useState(false); // NEW: Timeout State
+    const [showExitDialog, setShowExitDialog] = useState(false); // NEW: Exit Dialog
     
     // Data State
     const [scenario, setScenario] = useState<Scenario | null>(null);
@@ -53,6 +54,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     const [isProcessing, setIsProcessing] = useState(false); 
     const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // Audio Context for PTT Beeps (Sound Effect)
+    const sfxContextRef = useRef<AudioContext | null>(null);
+
     // Prevent Sleep during exam
     useWakeLock(view === 'exam');
 
@@ -63,6 +67,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             if (liveClientRef.current) {
                 liveClientRef.current.disconnect();
                 liveClientRef.current = null;
+            }
+            if (sfxContextRef.current) {
+                sfxContextRef.current.close();
             }
         };
     }, []);
@@ -106,6 +113,46 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         startExam(scenario, airportCode);
     };
 
+    // --- PTT Sound Effect Logic ---
+    const playPttSound = (type: 'ON' | 'OFF') => {
+        try {
+            if (!sfxContextRef.current) {
+                sfxContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+            }
+            const ctx = sfxContextRef.current;
+            if (ctx.state === 'suspended') ctx.resume();
+
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            if (type === 'ON') {
+                // High pitch short beep (Radio Keying)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1200, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.05);
+                gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.05);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + 0.06);
+            } else {
+                // Low pitch static burst (Radio Release/Squelch)
+                // Using triangle wave to simulate a bit of "roughness" without noise buffer complexity
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.15, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + 0.1);
+            }
+        } catch (e) {
+            // Ignore audio errors
+        }
+    };
+
     const startExam = async (examScenario: Scenario, airportCode: string) => {
         // 0. Prevent Double Clicks
         if (status === ConnectionStatus.CONNECTING) return;
@@ -138,6 +185,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         setErrorMsg(null);
         setIsTimeout(false); // Reset timeout state
         setIsProcessing(false); // Reset processing
+        setShowExitDialog(false); // Reset dialog
         startTimeRef.current = Date.now();
         lastActivityRef.current = Date.now(); // Reset Activity Timer
 
@@ -273,18 +321,33 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         setView('lobby');
         setIsTimeout(false);
         setIsProcessing(false);
+        setShowExitDialog(false);
     };
 
     const handleFinishManually = async () => {
+        setShowExitDialog(false);
         if (liveClientRef.current && status === ConnectionStatus.CONNECTED) {
             setStatus(ConnectionStatus.ANALYZING);
             await liveClientRef.current.finalize();
         }
     };
 
+    // Return to Lobby while analysis runs in background (fire-and-forget for UI)
+    const handleBackgroundProcessing = () => {
+        // We disconnect the live socket but don't strictly "cancel" the backend processing 
+        // since the model might already be calling the tool. 
+        // We just reset the UI to lobby.
+        if (liveClientRef.current) {
+            liveClientRef.current.disconnect();
+        }
+        setStatus(ConnectionStatus.DISCONNECTED);
+        setView('lobby');
+    };
+
     // PTT Logic Wrapper
     const engagePtt = () => {
         updateActivity(); // Reset inactivity timer
+        playPttSound('ON'); // SOUND EFFECT
         if (status === ConnectionStatus.CONNECTED) {
             // Force clear processing state when user interrupts
             setIsProcessing(false);
@@ -303,6 +366,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     };
 
     const releasePtt = () => {
+        playPttSound('OFF'); // SOUND EFFECT
         if (status === ConnectionStatus.CONNECTED) {
             setIsTransmitting(false);
             // Set Processing State immediately on release
@@ -343,7 +407,14 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         refresh: language === 'cn' ? '重新开始' : 'Restart',
         standby: language === 'cn' ? '请回复 ATC' : 'Reply to ATC', 
         processing: language === 'cn' ? 'ATC 思考中...' : 'ATC Thinking...', 
-        wait: language === 'cn' ? '请等待回复' : 'Please wait' 
+        wait: language === 'cn' ? '请等待回复' : 'Please wait',
+        // Exit Dialog
+        quitConfirmTitle: language === 'cn' ? '提交或放弃?' : 'Submit or Abort?',
+        quitConfirmDesc: language === 'cn' ? '您可以提交考试以生成评估报告，或者直接放弃本次考试。' : 'Submit to generate an assessment report, or abort without saving.',
+        abortBtn: language === 'cn' ? '放弃考试 (Abort)' : 'Abort Exam',
+        submitBtn: language === 'cn' ? '提交评估 (Submit)' : 'Submit Exam',
+        cancel: language === 'cn' ? '取消' : 'Cancel',
+        bgProcess: language === 'cn' ? '后台处理 (返回大厅)' : 'Run in Background (Return to Lobby)'
     };
 
     // --- RENDERERS ---
@@ -459,15 +530,59 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 </div>
             )}
 
-            {/* Status Overlay (Loading) */}
+            {/* Exit Confirmation Dialog */}
+            {showExitDialog && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+                    <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 flex flex-col items-center text-center">
+                        <div className="w-12 h-12 bg-ios-blue/10 rounded-full flex items-center justify-center mb-4 text-ios-blue">
+                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </div>
+                        <h3 className="text-lg font-bold text-gray-900 mb-2">{t.quitConfirmTitle}</h3>
+                        <p className="text-sm text-gray-500 mb-6 leading-relaxed">{t.quitConfirmDesc}</p>
+                        
+                        <div className="w-full space-y-3">
+                            <button 
+                                onClick={handleFinishManually}
+                                className="w-full py-3 bg-ios-blue text-white rounded-xl font-bold shadow-lg hover:shadow-blue-200 active:scale-95 transition-all flex items-center justify-center"
+                            >
+                                <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                {t.submitBtn}
+                            </button>
+                            
+                            <button 
+                                onClick={handleAbort}
+                                className="w-full py-3 bg-white border border-gray-200 text-red-500 font-bold rounded-xl hover:bg-gray-50 active:scale-95 transition-all"
+                            >
+                                {t.abortBtn}
+                            </button>
+
+                            <button 
+                                onClick={() => setShowExitDialog(false)}
+                                className="w-full py-2 text-gray-400 text-xs font-semibold mt-2"
+                            >
+                                {t.cancel}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Status Overlay (Loading/Analyzing) */}
             {status === ConnectionStatus.ANALYZING && (
-                 <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-md flex flex-col items-center justify-center text-ios-text animate-fade-in">
+                 <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-md flex flex-col items-center justify-center text-ios-text animate-fade-in p-6 text-center">
                      <div className="relative mb-6">
                          <div className="w-20 h-20 border-4 border-gray-100 rounded-full"></div>
                          <div className="w-20 h-20 border-4 border-ios-blue border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
                      </div>
                      <h2 className="text-2xl font-bold mb-2">{t.examSubmitted}</h2>
-                     <p className="text-ios-subtext text-sm">{t.generating}</p>
+                     <p className="text-ios-subtext text-sm mb-8">{t.generating}</p>
+                     
+                     <button 
+                        onClick={handleBackgroundProcessing}
+                        className="px-6 py-2.5 bg-gray-100 text-gray-600 rounded-full font-bold text-xs hover:bg-gray-200 transition-colors"
+                     >
+                         {t.bgProcess}
+                     </button>
                  </div>
             )}
             
@@ -481,9 +596,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     </div>
                 </div>
                 
-                {/* Finish Button - Top Right */}
+                {/* Finish Button - Triggers Confirmation */}
                 <button 
-                    onClick={handleFinishManually}
+                    onClick={() => setShowExitDialog(true)}
                     disabled={status !== ConnectionStatus.CONNECTED}
                     className="bg-white/80 backdrop-blur-md text-ios-red border border-red-100 px-4 py-2 rounded-full text-xs font-bold shadow-sm hover:bg-red-50 active:scale-95 transition-all flex items-center space-x-1"
                 >
@@ -534,8 +649,6 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                             {scenario?.details || "Scenario details are loading or unavailable. Please proceed with the examination based on the initial briefing."}
                         </div>
                     </div>
-                    
-                    {/* Last Transmission Block Removed as per request */}
                 </div>
             </div>
 

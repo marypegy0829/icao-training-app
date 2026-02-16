@@ -12,12 +12,16 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     
     // SECURITY: API Key Configuration
-    const googleApiKey = env.GEMINI_API_KEY || env.API_KEY || 'AIzaSyAL93ejSujySzpvmU5kyQdlmoZQnVRJ6Zg';
+    // Logic: 
+    // 1. Prioritize VITE_GEMINI_API_KEY (standard .env naming)
+    // 2. Fallback to other variants
+    // 3. Default to empty string (Do NOT hardcode secrets here to ensure hidden design)
+    const googleApiKey = env.VITE_GEMINI_API_KEY || env.GEMINI_API_KEY || env.API_KEY || '';
     
     // Supabase Configuration
-    // Priority: 1. Env Var -> 2. Hardcoded User Credentials
-    const supabaseUrl = env.VITE_SUPABASE_URL || 'https://gffpwwrkojfbzmdeslck.supabase.co';
-    const supabaseKey = env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdmZnB3d3Jrb2pmYnptZGVzbGNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkyNDY2NzksImV4cCI6MjA4NDgyMjY3OX0.rldNOeAsx6d2q-xEAo_uN5ElY94ZBC0dM7uqj5JiEnI';
+    // Rely strictly on environment variables for security
+    const supabaseUrl = env.VITE_SUPABASE_URL || '';
+    const supabaseKey = env.VITE_SUPABASE_KEY || '';
 
     return {
       server: {
