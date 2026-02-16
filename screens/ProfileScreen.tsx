@@ -37,10 +37,6 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [activeModal, setActiveModal] = useState<'achievements' | 'mistakes' | 'logs' | null>(null);
   const [selectedReport, setSelectedReport] = useState<AssessmentData | null>(null);
 
-  // API Key Management State
-  const [customKey, setCustomKey] = useState('');
-  const [showKeyInput, setShowKeyInput] = useState(false);
-
   const fetchProfileData = useCallback(async () => {
         // Don't set global loading here to avoid flashing UI on refresh
         const uid = await userService.getCurrentUserId();
@@ -58,9 +54,6 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
             setHistoryCount(logsData ? logsData.length : 0);
             setAchievements(achData);
             setMistakes(mistakesData);
-
-            const savedKey = localStorage.getItem('gemini_api_key');
-            if (savedKey) setCustomKey(savedKey);
         } catch (e) {
             console.error("Profile data load error", e);
         }
@@ -81,16 +74,6 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
       setActiveModal(null);
       // Also refresh when closing mistake book in case items were deleted
       fetchProfileData();
-  };
-
-  const handleSaveKey = () => {
-      if (customKey.trim()) {
-          localStorage.setItem('gemini_api_key', customKey.trim());
-          alert("自定义 API Key 已保存。");
-      } else {
-          localStorage.removeItem('gemini_api_key');
-          alert("已切换回默认/环境变量 API Key。");
-      }
   };
 
   const handleSignOut = async () => {
@@ -322,7 +305,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
              </div>
 
              {/* Setting Item: Cockpit Noise */}
-             <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+             <div className="p-4 flex items-center justify-between">
                  <div className="flex flex-col">
                     <div className="flex items-center space-x-3">
                         <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center">
@@ -338,37 +321,6 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({
                  >
                      <div className={`w-5 h-5 bg-white rounded-full shadow absolute top-0.5 transition-transform ${cockpitNoise ? 'translate-x-5.5 left-0.5' : 'left-0.5'}`}></div>
                  </button>
-             </div>
-
-             {/* Setting Item: Developer Settings / API Key */}
-             <div className="p-4 bg-gray-50/50">
-                 <button 
-                    onClick={() => setShowKeyInput(!showKeyInput)}
-                    className="flex items-center justify-between w-full text-xs font-bold text-gray-400 uppercase tracking-wider hover:text-gray-600 transition-colors"
-                 >
-                    <span>Developer Config</span>
-                    <svg className={`w-4 h-4 transition-transform ${showKeyInput ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                 </button>
-                 
-                 {showKeyInput && (
-                     <div className="mt-3 animate-fade-in">
-                         <div className="flex space-x-2">
-                             <input 
-                               type="password"
-                               value={customKey}
-                               onChange={(e) => setCustomKey(e.target.value)}
-                               placeholder="AIza..."
-                               className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-ios-blue"
-                             />
-                             <button 
-                                onClick={handleSaveKey}
-                                className="px-3 py-2 bg-ios-text text-white text-xs font-bold rounded-lg hover:bg-gray-800"
-                             >
-                                Save
-                             </button>
-                         </div>
-                     </div>
-                 )}
              </div>
 
          </div>

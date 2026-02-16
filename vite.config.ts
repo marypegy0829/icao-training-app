@@ -9,6 +9,9 @@ const __dirname = path.dirname(__filename);
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    // Prioritize environment variable, fallback to the provided key
+    const apiKey = env.GEMINI_API_KEY || "AIzaSyAvcblrRHj8FCfo9hH5DqwK5ohdo8q8k_8";
+
     return {
       server: {
         port: 3000,
@@ -16,8 +19,8 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+        'process.env.API_KEY': JSON.stringify(apiKey),
+        'process.env.GEMINI_API_KEY': JSON.stringify(apiKey)
       },
       resolve: {
         alias: {

@@ -50,7 +50,7 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario, airportCode = '----
   };
 
   return (
-    <div className="grid grid-cols-12 gap-2 w-full max-w-2xl mx-auto h-24 sm:h-28">
+    <div className="grid grid-cols-12 gap-2 w-full max-w-2xl mx-auto h-28 sm:h-32 transition-all">
       
       {/* --- Left Card: COMMS (Narrower: col-span-4) --- */}
       <div className="col-span-4 bg-ios-surface/90 backdrop-blur-xl rounded-2xl p-2 sm:p-3 flex flex-col justify-between border border-ios-border shadow-soft relative overflow-hidden">
@@ -87,7 +87,7 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario, airportCode = '----
                 <div className="flex justify-between items-start">
                     <div className="flex flex-col">
                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Elapsed Time</span>
-                        <span className={`font-mono text-xl sm:text-2xl font-black tracking-tight tabular-nums leading-none ${active ? 'text-ios-blue' : 'text-gray-400'}`}>
+                        <span className={`font-mono text-xl sm:text-3xl font-black tracking-tight tabular-nums leading-none ${active ? 'text-ios-blue' : 'text-gray-400'}`}>
                             {formatTime(elapsed)}
                         </span>
                     </div>
@@ -115,7 +115,7 @@ const CockpitDisplay: React.FC<Props> = ({ active, scenario, airportCode = '----
                     {/* Callsign */}
                     <div className="flex flex-col items-end shrink-0">
                         <span className="text-[9px] font-bold text-ios-subtext uppercase tracking-wider mb-0.5">Callsign</span>
-                        <span className="text-sm sm:text-lg font-black text-ios-orange tracking-wide leading-none">{scenario.callsign}</span>
+                        <span className="text-sm sm:text-xl font-black text-ios-orange tracking-wide leading-none">{scenario.callsign}</span>
                     </div>
                 </div>
              </>

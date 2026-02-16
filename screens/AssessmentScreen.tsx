@@ -1,547 +1,484 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { LiveClient } from '../services/liveClient';
 import { scenarioService } from '../services/scenarioService';
 import { ruleService } from '../services/ruleService';
+import { userService } from '../services/userService';
+import { LiveClient } from '../services/liveClient';
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, DifficultyLevel } from '../types';
+import BriefingModal from '../components/BriefingModal';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
 import Transcript from '../components/Transcript';
 import AssessmentReport from '../components/AssessmentReport';
-import BriefingModal from '../components/BriefingModal';
 import HistoryModal from '../components/HistoryModal';
-import { userService } from '../services/userService';
 import { useWakeLock } from '../hooks/useWakeLock';
 
 interface AssessmentScreenProps {
-  difficulty: DifficultyLevel;
-  accentEnabled: boolean;
-  cockpitNoise: boolean;
+    difficulty: DifficultyLevel;
+    accentEnabled: boolean;
+    cockpitNoise: boolean;
 }
 
 const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentEnabled, cockpitNoise }) => {
-  const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [audioLevel, setAudioLevel] = useState(0);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [assessment, setAssessment] = useState<AssessmentData | null>(null);
-  const [scenario, setScenario] = useState<Scenario | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const startTimeRef = useRef<number>(0);
-  
-  // Track selected airport internally for reconnect logic
-  const [activeAirport, setActiveAirport] = useState<string>('ZBAA');
-
-  // PTT State
-  const [isTransmitting, setIsTransmitting] = useState(false);
-  const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const liveClientRef = useRef<LiveClient | null>(null);
-
-  // --- PREVENT SCREEN SLEEP ---
-  const isSessionActive = status === ConnectionStatus.BRIEFING || status === ConnectionStatus.CONNECTING || status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING;
-  useWakeLock(isSessionActive);
-  
-  // Connection Watchdog Timer
-  useEffect(() => {
-      let watchdog: ReturnType<typeof setTimeout>;
-      
-      if (status === ConnectionStatus.CONNECTING) {
-          watchdog = setTimeout(() => {
-              if (status === ConnectionStatus.CONNECTING) {
-                  console.error("Connection timed out.");
-                  setStatus(ConnectionStatus.ERROR);
-                  setErrorMsg("连接超时。请检查网络或 API Key 设置。");
-                  liveClientRef.current?.disconnect();
-              }
-          }, 15000);
-      }
-
-      return () => clearTimeout(watchdog);
-  }, [status]);
-
-  // Get API KEY safely with Override support
-  const getApiKey = () => {
-    const localKey = localStorage.getItem('gemini_api_key');
-    if (localKey && localKey.trim().length > 0) return localKey.trim();
-
-    let key = '';
-    try {
-      const meta = import.meta as any;
-      if (meta.env && meta.env.VITE_API_KEY) {
-        key = meta.env.VITE_API_KEY;
-      }
-    } catch (e) {}
+    // Flow State
+    const [view, setView] = useState<'lobby' | 'briefing' | 'exam' | 'report'>('lobby');
+    const [showHistory, setShowHistory] = useState(false);
     
-    if (!key && typeof process !== 'undefined' && process.env) {
-      key = process.env.VITE_API_KEY || process.env.API_KEY || '';
-    }
-    return key.trim();
-  };
+    // Data State
+    const [scenario, setScenario] = useState<Scenario | null>(null);
+    const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [audioLevel, setAudioLevel] = useState(0);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [assessment, setAssessment] = useState<AssessmentData | null>(null);
 
-  const API_KEY = getApiKey();
+    // Live Client Refs
+    const liveClientRef = useRef<LiveClient | null>(null);
+    const startTimeRef = useRef<number>(0);
+    
+    // PTT State
+    const [isTransmitting, setIsTransmitting] = useState(false);
+    const pttTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    if (!API_KEY) {
-      setErrorMsg("未找到 API Key。请检查设置。");
-    }
-    return () => {
-      liveClientRef.current?.disconnect();
-      if (pttTimeoutRef.current) clearTimeout(pttTimeoutRef.current);
+    // Prevent Sleep during exam
+    useWakeLock(view === 'exam');
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            handleAbort(); 
+        };
+    }, []);
+
+    const startNewAssessmentProcess = async () => {
+        const randomScenario = await scenarioService.getRandomAssessmentScenario();
+        setScenario(randomScenario);
+        setView('briefing');
     };
-  }, []);
 
-  // Safety Timeout for Analysis
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>;
-    if (status === ConnectionStatus.ANALYZING) {
-      timeoutId = setTimeout(() => {
-        setErrorMsg("分析超时。模型未返回报告，请重试。");
-        setStatus(ConnectionStatus.ERROR);
+    const handleAcceptBriefing = (airportCode: string) => {
+        if (!scenario) return;
+        startExam(scenario, airportCode);
+    };
+
+    const startExam = async (examScenario: Scenario, airportCode: string) => {
+        if (!process.env.API_KEY) {
+            setErrorMsg("API Key Config Error");
+            setStatus(ConnectionStatus.ERROR);
+            return;
+        }
+
+        // Ensure state is synced
+        setScenario(examScenario);
+        setView('exam');
+        setStatus(ConnectionStatus.CONNECTING);
+        setMessages([]);
+        setAssessment(null);
+        setErrorMsg(null);
+        startTimeRef.current = Date.now();
+
+        // Initialize LiveClient
+        liveClientRef.current = new LiveClient();
+        
+        // PTT Only for Assessment (Standardization)
+        liveClientRef.current.setBufferedMode(true);
+        liveClientRef.current.setInputMuted(true);
+
+        // Fetch Dynamic Rules
+        const dynamicRules = await ruleService.getLogicRulesForPhase(examScenario.phase || 'Ground Ops');
+
+        const assessmentInstruction = `
+        # SYSTEM INSTRUCTION: ICAO EXAMINER
+        You are an ICAO English Examiner and ATC.
+        Conduct a formal assessment for the pilot.
+        
+        Scenario: ${examScenario.title}
+        Phase: ${examScenario.phase}
+        Details: ${examScenario.details}
+        Weather: ${examScenario.weather}
+
+        1. Act as ATC. Issue instructions clearly.
+        2. Introduce complications based on the scenario details.
+        3. DO NOT BREAK CHARACTER.
+        4. When the scenario is concluded or if the user fails critically, call 'reportAssessment' tool to finish.
+        `;
+
+        await liveClientRef.current.connect(
+            examScenario,
+            {
+                onOpen: () => {
+                    setStatus(ConnectionStatus.CONNECTED);
+                    startTimeRef.current = Date.now();
+                },
+                onClose: () => {
+                   if (status !== ConnectionStatus.ANALYZING && status !== ConnectionStatus.ERROR) {
+                       // Expected close logic
+                   }
+                },
+                onError: (err) => {
+                    setStatus(ConnectionStatus.ERROR);
+                    setErrorMsg(err.message);
+                },
+                onAudioData: (level) => setAudioLevel(level),
+                onTurnComplete: () => setAudioLevel(0),
+                onTranscript: (text, role, isPartial) => {
+                    setMessages(prev => {
+                        const lastMsg = prev[prev.length - 1];
+                        if (role === 'user') {
+                            if (lastMsg && lastMsg.role === 'user' && lastMsg.isPartial) {
+                                const newMsgs = [...prev];
+                                newMsgs[newMsgs.length - 1] = { ...lastMsg, text, isPartial };
+                                if (!isPartial && !text) return prev;
+                                return newMsgs;
+                            } else if (text) {
+                                return [...prev, { id: Date.now().toString(), role, text, isPartial }];
+                            }
+                        } else if (role === 'ai') {
+                             if (lastMsg && lastMsg.role === 'ai') {
+                                const newMsgs = [...prev];
+                                newMsgs[newMsgs.length - 1] = { ...lastMsg, text: lastMsg.text + text };
+                                return newMsgs;
+                            } else {
+                                return [...prev, { id: Date.now().toString(), role, text }];
+                            }
+                        }
+                        return prev;
+                    });
+                },
+                onAssessment: (data) => {
+                    setAssessment(data);
+                    setStatus(ConnectionStatus.DISCONNECTED);
+                    liveClientRef.current?.disconnect();
+                    
+                    // Save to DB
+                    const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+                    userService.saveSession(
+                        examScenario.title,
+                        examScenario.phase || 'General',
+                        data,
+                        duration,
+                        'ASSESSMENT'
+                    );
+                    
+                    setView('report');
+                }
+            },
+            difficulty,
+            airportCode,
+            accentEnabled,
+            cockpitNoise,
+            assessmentInstruction,
+            dynamicRules
+        );
+    };
+
+    const handleAbort = () => {
         liveClientRef.current?.disconnect();
-      }, 60000);
-    }
-    return () => clearTimeout(timeoutId);
-  }, [status]);
-
-  // PTT Logic Wrapper
-  const engagePtt = () => {
-      if (status === ConnectionStatus.CONNECTED) {
-          if (pttTimeoutRef.current) {
-              clearTimeout(pttTimeoutRef.current);
-              pttTimeoutRef.current = null;
-          }
-          if (!isTransmitting) {
-              setIsTransmitting(true);
-              // Call startRecording (which handles AudioContext resume internally)
-              liveClientRef.current?.startRecording();
-          }
-      }
-  };
-
-  const releasePtt = () => {
-      if (status === ConnectionStatus.CONNECTED) {
-          setIsTransmitting(false);
-          // Add 1000ms tail padding to catch end of sentence (FIXED: increased from 500ms)
-          pttTimeoutRef.current = setTimeout(() => {
-              liveClientRef.current?.stopRecording();
-          }, 1000);
-      }
-  };
-
-  // Keyboard Listeners for Spacebar PTT
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat) {
-          engagePtt();
-      }
+        setStatus(ConnectionStatus.DISCONNECTED);
+        setView('lobby');
     };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-          releasePtt();
-      }
+    const handleFinishManually = async () => {
+        if (liveClientRef.current && status === ConnectionStatus.CONNECTED) {
+            setStatus(ConnectionStatus.ANALYZING);
+            await liveClientRef.current.finalize();
+        }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+    // PTT Logic Wrapper
+    const engagePtt = () => {
+        if (status === ConnectionStatus.CONNECTED) {
+            if (pttTimeoutRef.current) {
+                clearTimeout(pttTimeoutRef.current);
+                pttTimeoutRef.current = null;
+                setIsTransmitting(true);
+                return;
+            }
+            if (!isTransmitting) {
+                setIsTransmitting(true);
+                liveClientRef.current?.startRecording();
+            }
+        }
     };
-  }, [status, isTransmitting]);
 
-  const saveToSupabase = async (finalAssessment: AssessmentData | null) => {
-      if (!scenario) return;
-      console.log("Saving session to history...", finalAssessment ? "With Report" : "No Report");
-      const durationSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
-      
-      try {
-          const result = await userService.saveSession(
-              scenario.title,
-              scenario.phase || 'Assessment',
-              finalAssessment,
-              durationSeconds,
-              'ASSESSMENT'
-          );
-          if (!result.success) {
-              console.error("SAVE FAILED:", result.error);
-          } else {
-              console.log("SESSION SAVED SUCCESSFULLY");
-          }
-      } catch (e) {
-          console.error("Save Exception:", e);
-      }
-  };
+    const releasePtt = () => {
+        if (status === ConnectionStatus.CONNECTED) {
+            setIsTransmitting(false);
+            pttTimeoutRef.current = setTimeout(() => {
+                liveClientRef.current?.stopRecording();
+                pttTimeoutRef.current = null;
+            }, 1000);
+        }
+    };
 
-  const startBriefing = async () => {
-     try {
-       const s = await scenarioService.getRandomAssessmentScenario();
-       setScenario(s);
-       setStatus(ConnectionStatus.BRIEFING);
-       setErrorMsg(null);
-     } catch (e) {
-       console.error("Failed to load scenario", e);
-       setErrorMsg("无法加载考试题目，请检查网络。");
-       setStatus(ConnectionStatus.ERROR);
-     }
-  };
-  
-  const handleRefreshScenario = async () => {
-      const s = await scenarioService.getRandomAssessmentScenario();
-      setScenario(s);
-  };
+    // --- RENDERERS ---
 
-  const handleReconnect = async () => {
-    if (scenario) {
-      handleConnect(activeAirport);
-    } else {
-      startBriefing();
-    }
-  };
-
-  const handleConnect = async (selectedAirportCode: string) => {
-    if (!API_KEY) {
-        setErrorMsg("缺少 API Key。请检查设置。");
-        setStatus(ConnectionStatus.ERROR);
-        return;
-    }
-    if (!scenario) return;
-    
-    setActiveAirport(selectedAirportCode);
-    setStatus(ConnectionStatus.CONNECTING);
-    setMessages([]); // Clear previous transcript
-    
-    liveClientRef.current = new LiveClient(API_KEY);
-    
-    // FORCE PTT BUFFERED MODE for Assessment
-    liveClientRef.current.setBufferedMode(true);
-
-    let dynamicRules = "";
-    if (scenario.phase) {
-        dynamicRules = await ruleService.getLogicRulesForPhase(scenario.phase);
-    }
-
-    try {
-        await liveClientRef.current.connect(scenario, {
-          onOpen: () => {
-              console.log(`Connection Established at ${selectedAirportCode}`);
-              setStatus(ConnectionStatus.CONNECTED);
-              startTimeRef.current = Date.now();
-          },
-          onClose: () => { 
-            setStatus(prev => {
-                if (prev === ConnectionStatus.ANALYZING) return prev;
-                return prev === ConnectionStatus.ERROR ? prev : ConnectionStatus.DISCONNECTED;
-            }); 
-            setAudioLevel(0);
-          },
-          onError: (err) => { 
-            console.error("Connection Error (UI):", err);
-            setStatus(ConnectionStatus.ERROR); 
-            setErrorMsg(err.message || "连接失败。请检查控制台。"); 
-            setAudioLevel(0);
-          },
-          onAudioData: (level) => setAudioLevel(level),
-          onTurnComplete: () => setAudioLevel(0),
-          onTranscript: (text, role, isPartial) => {
-            setMessages(prev => {
-              const lastMsg = prev[prev.length - 1];
-              if (role === 'user') {
-                 if (lastMsg && lastMsg.role === 'user' && lastMsg.isPartial) {
-                     const newMsgs = [...prev];
-                     newMsgs[newMsgs.length - 1] = { ...lastMsg, text: text, isPartial: isPartial };
-                     if (!isPartial && text === "") return prev; 
-                     return newMsgs;
-                 } else if (text) {
-                     return [...prev, { id: Date.now().toString(), role, text, isPartial }];
-                 }
-              } 
-              if (role === 'ai') {
-                 if (lastMsg && lastMsg.role === 'ai') {
-                     const newMsgs = [...prev];
-                     newMsgs[newMsgs.length - 1] = { ...lastMsg, text: lastMsg.text + text };
-                     return newMsgs;
-                 } else {
-                     return [...prev, { id: Date.now().toString(), role, text }];
-                 }
-              }
-              return prev;
-            });
-          },
-          onAssessment: (data) => {
-            console.log("Assessment Received:", data);
-            setAssessment(data);
-            saveToSupabase(data);
+    const renderLobby = () => (
+        <div className="h-full bg-ios-bg flex flex-col relative overflow-hidden font-sans">
+            {/* Background Blob */}
+            <div className="absolute top-[-20%] right-[-20%] w-[500px] h-[500px] bg-blue-100/50 rounded-full blur-[80px] pointer-events-none"></div>
             
-            setTimeout(() => {
-                setStatus(ConnectionStatus.DISCONNECTED);
-                liveClientRef.current?.disconnect();
-            }, 500);
-          }
-        }, difficulty, selectedAirportCode, accentEnabled, cockpitNoise, undefined, dynamicRules);
-    } catch (err: any) {
-        console.error("Immediate Connection Failure:", err);
-        setStatus(ConnectionStatus.ERROR);
-        setErrorMsg(err.message || "初始化连接失败。");
-    }
-  };
-
-  const handleStop = async () => {
-    if (liveClientRef.current && status === ConnectionStatus.CONNECTED) {
-      setStatus(ConnectionStatus.ANALYZING);
-      await liveClientRef.current.finalize();
-    } else {
-      const currentStatus = status; // Break potential TS narrowing
-      if (currentStatus === ConnectionStatus.CONNECTED || currentStatus === ConnectionStatus.ANALYZING) {
-          saveToSupabase(null);
-      }
-      setStatus(ConnectionStatus.DISCONNECTED);
-      setAudioLevel(0);
-      liveClientRef.current?.disconnect();
-    }
-  };
-
-  // PTT Handlers (Mouse/Touch)
-  const handlePttDown = (e?: React.SyntheticEvent) => {
-    if (e) e.preventDefault();
-    engagePtt();
-  };
-  const handlePttUp = (e?: React.SyntheticEvent) => {
-    if (e) e.preventDefault();
-    releasePtt();
-  };
-
-  // Helper for main button state
-  const getMainActionState = () => {
-      switch (status) {
-          case ConnectionStatus.CONNECTED:
-              return { label: '交卷', color: 'bg-red-500 hover:bg-red-600 shadow-red-200', icon: 'stop' };
-          case ConnectionStatus.ANALYZING:
-              return { label: '生成中...', color: 'bg-gray-400', icon: 'loading' };
-          case ConnectionStatus.CONNECTING:
-              return { label: '连接中...', color: 'bg-gray-400', icon: 'loading' };
-          default:
-              return { label: '开始测试', color: 'bg-ios-blue hover:bg-blue-600 shadow-blue-200', icon: 'play' };
-      }
-  };
-
-  const actionState = getMainActionState();
-
-  return (
-    <div className="h-full w-full relative flex flex-col bg-ios-bg overflow-hidden text-ios-text font-sans">
-      
-      {/* Loading Overlay */}
-      {status === ConnectionStatus.ANALYZING && (
-          <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-md flex flex-col items-center justify-center text-white animate-fade-in">
-              <div className="relative">
-                  <div className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                     <span className="text-xs font-bold animate-pulse">AI</span>
-                  </div>
-              </div>
-              <h2 className="text-2xl font-bold mt-6 mb-2">正在分析表现</h2>
-              <p className="text-sm text-white/80">生成 ICAO 评估报告中...</p>
-          </div>
-      )}
-
-      {/* Assessment Modal */}
-      {assessment && (
-        <AssessmentReport 
-          data={assessment} 
-          onClose={() => setAssessment(null)} 
-        />
-      )}
-      
-      {/* History Modal */}
-      {showHistory && (
-          <HistoryModal 
-             onClose={() => setShowHistory(false)}
-             onSelectReport={(data) => {
-                 setAssessment(data);
-                 setShowHistory(false);
-             }}
-             initialFilter="ASSESSMENT"
-          />
-      )}
-
-      {/* Briefing Modal */}
-      {status === ConnectionStatus.BRIEFING && scenario && (
-        <BriefingModal 
-            scenario={scenario} 
-            onAccept={handleConnect}
-            onCancel={() => setStatus(ConnectionStatus.DISCONNECTED)}
-            onRefresh={handleRefreshScenario}
-        />
-      )}
-
-      {/* Dynamic Background */}
-      <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-sky-200/40 rounded-full blur-[100px] animate-blob mix-blend-multiply pointer-events-none"></div>
-      <div className="absolute top-[10%] right-[-10%] w-[500px] h-[500px] bg-orange-100/60 rounded-full blur-[100px] animate-blob animation-delay-2000 mix-blend-multiply pointer-events-none"></div>
-      
-      {/* --- HEADER --- */}
-      <header className="z-20 pt-12 pb-4 px-6 flex justify-between items-center bg-ios-bg/50 backdrop-blur-sm sticky top-0">
-        <div>
-           <div className="flex items-center space-x-2 mb-1">
-             <div className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-ios-orange animate-pulse' : 'bg-gray-400'}`}></div>
-             <span className="text-[10px] font-bold tracking-widest text-ios-subtext uppercase">ICAO Level 5</span>
-           </div>
-           <h1 className="text-2xl font-bold tracking-tight text-ios-text">AI 模拟考官</h1>
-        </div>
-        
-        {/* Top Right Controls - Combined Logic */}
-        <div className="flex items-center space-x-2">
-           
-           {/* 1. Main Action Button (Start / Submit) */}
-           <button 
-                onClick={status === ConnectionStatus.CONNECTED ? handleStop : startBriefing}
-                disabled={status === ConnectionStatus.CONNECTING || status === ConnectionStatus.ANALYZING || (!API_KEY && status === ConnectionStatus.DISCONNECTED)}
-                className={`h-10 px-4 ${actionState.color} text-white rounded-full font-bold text-sm shadow-lg active:scale-95 transition-all flex items-center disabled:opacity-50 disabled:shadow-none min-w-[100px] justify-center`}
-            >
-                {actionState.icon === 'loading' ? (
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
-                ) : actionState.icon === 'stop' ? (
-                    <div className="w-3 h-3 bg-white rounded-sm mr-2"></div>
-                ) : (
-                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            {/* Header */}
+            <div className="pt-12 px-6 pb-2 flex justify-between items-center z-10">
+                <div>
+                    <h1 className="text-3xl font-bold text-ios-text tracking-tight">Proficiency Check</h1>
+                    <p className="text-sm text-ios-subtext font-medium mt-1">ICAO Level 4-6 Assessment</p>
+                </div>
+                <button 
+                    onClick={() => setShowHistory(true)}
+                    className="w-10 h-10 bg-white rounded-full shadow-sm border border-gray-100 flex items-center justify-center text-ios-blue hover:bg-gray-50 active:scale-95 transition-all"
+                >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                )}
-                {actionState.label}
-            </button>
-
-            {/* 2. History Report Button (Eye-catching) */}
-            <button 
-                onClick={() => setShowHistory(true)}
-                className="h-10 px-4 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-full font-bold text-sm shadow-lg shadow-orange-200 hover:shadow-orange-300 active:scale-95 transition-all flex items-center"
-            >
-                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 00-2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                </svg>
-                历史报告
-            </button>
-
-        </div>
-      </header>
-
-      {/* --- MAIN CONTENT --- */}
-      <main className="z-10 flex-1 flex flex-col relative overflow-hidden">
-        
-        {/* Upper: Visualizer & Cockpit */}
-        <div className="shrink-0 pt-2 pb-4 px-6 flex flex-col items-center space-y-4">
-           <Visualizer isActive={status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING} audioLevel={audioLevel} />
-           <CockpitDisplay 
-                active={status === ConnectionStatus.CONNECTED} 
-                scenario={scenario} 
-                airportCode={activeAirport} 
-           />
-        </div>
-
-        {/* Lower: Transcript */}
-        <div className="flex-1 flex flex-col bg-white/50 backdrop-blur-lg border-t border-white/20 rounded-t-[2.5rem] shadow-soft overflow-hidden mx-2 relative">
-            <div className="px-6 py-3 border-b border-black/5 flex justify-between items-center bg-white/40 backdrop-blur-md z-20">
-                <span className="text-xs font-semibold text-ios-subtext">实时对话记录 (Live Transcript)</span>
-                {status === ConnectionStatus.CONNECTING && <span className="text-xs text-ios-blue animate-pulse">正在连接...</span>}
-                {status === ConnectionStatus.CONNECTED && (
-                    <span className="text-[10px] font-mono font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded border border-gray-200">
-                        {activeAirport}
-                    </span>
-                )}
+                </button>
             </div>
-            
-            {/* Pinned Situation Box */}
-            {scenario && (
-              <div className="px-6 py-4 bg-yellow-50/80 backdrop-blur-sm border-b border-yellow-100/50 z-10 shrink-0 shadow-sm transition-all animate-fade-in">
-                  <div className="flex items-start space-x-3">
-                      <div className="mt-1 shrink-0 bg-yellow-100 text-yellow-600 rounded-lg p-1.5">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                          <span className="text-[10px] sm:text-xs font-bold text-yellow-700 uppercase tracking-wider block mb-1">Current Situation</span>
-                          <p className="text-sm sm:text-base text-yellow-900 leading-relaxed font-medium line-clamp-4">
-                              {scenario.details}
-                          </p>
-                      </div>
-                  </div>
-              </div>
-            )}
-            
-            {/* Error Overlay */}
-            {status === ConnectionStatus.ERROR && errorMsg && (
-              <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
-                <div className="w-12 h-12 bg-ios-red/10 rounded-full flex items-center justify-center mb-4">
-                  <svg className="w-6 h-6 text-ios-red" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
-                </div>
-                <h3 className="text-ios-text font-bold text-lg mb-2">连接失败</h3>
-                <p className="text-ios-subtext text-sm mb-6 max-w-xs">{errorMsg}</p>
-                <div className="flex space-x-3">
-                  <button 
-                    onClick={() => setStatus(ConnectionStatus.DISCONNECTED)}
-                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-full text-sm font-semibold hover:bg-gray-300 transition-all"
-                  >
-                    取消
-                  </button>
-                  <button 
-                    onClick={handleReconnect}
-                    className="px-6 py-2 bg-ios-red text-white rounded-full text-sm font-semibold shadow-lg hover:shadow-ios-red/30 transition-all"
-                  >
-                    重试
-                  </button>
-                </div>
-              </div>
-            )}
 
-            <Transcript messages={messages} />
+            {/* Content Body */}
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 relative z-10">
+                
+                {/* Hero Card */}
+                <div className="bg-white rounded-[2rem] p-6 shadow-soft border border-gray-100 relative overflow-hidden group">
+                    <div className="absolute inset-0 bg-gradient-to-br from-ios-blue to-ios-indigo opacity-5 group-hover:opacity-10 transition-opacity"></div>
+                    <div className="relative z-10">
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-ios-blue/10 border border-ios-blue/20">
+                                <span className="w-2 h-2 rounded-full bg-ios-blue animate-pulse"></span>
+                                <span className="text-[10px] font-bold text-ios-blue uppercase tracking-wider">AI Examiner Ready</span>
+                            </div>
+                            <span className="text-2xl">👨‍✈️</span>
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-900 mb-2 leading-tight">Standardized<br/>Voice Assessment</h2>
+                        <p className="text-sm text-gray-500 leading-relaxed mb-6 max-w-xs">
+                            Simulate emergency and non-routine situations. Rated on 6 ICAO dimensions.
+                        </p>
+                        <div className="flex items-center space-x-4 text-xs font-medium text-gray-400">
+                            <span className="flex items-center"><svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> ~10 Mins</span>
+                            <span className="flex items-center"><svg className="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg> 6 Skills</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Criteria Grid */}
+                <div>
+                    <h3 className="text-xs font-bold text-ios-subtext uppercase tracking-widest mb-4 px-1">Scoring Criteria</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                        {[
+                            { name: 'Pronunciation', icon: '🎙️', color: 'bg-orange-50 text-orange-600' },
+                            { name: 'Structure', icon: '🏗️', color: 'bg-blue-50 text-blue-600' },
+                            { name: 'Vocabulary', icon: '📖', color: 'bg-green-50 text-green-600' },
+                            { name: 'Fluency', icon: '🌊', color: 'bg-purple-50 text-purple-600' },
+                            { name: 'Comprehension', icon: '🧠', color: 'bg-pink-50 text-pink-600' },
+                            { name: 'Interactions', icon: '🤝', color: 'bg-indigo-50 text-indigo-600' },
+                        ].map((item) => (
+                            <div key={item.name} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-50 flex items-center space-x-3">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm ${item.color}`}>
+                                    {item.icon}
+                                </div>
+                                <span className="text-xs font-bold text-gray-700">{item.name}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            {/* Start Button Area (Fixed Bottom) */}
+            <div className="p-6 bg-ios-bg/90 backdrop-blur-md border-t border-gray-100 z-20">
+                <button 
+                    onClick={startNewAssessmentProcess}
+                    className="w-full bg-ios-text text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-gray-200 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center relative overflow-hidden"
+                >
+                    <span className="relative z-10">Begin Assessment</span>
+                    <svg className="w-5 h-5 ml-2 relative z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                    {/* Shine Effect */}
+                    <div className="absolute top-0 left-[-100%] w-full h-full bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_2s_infinite]"></div>
+                </button>
+            </div>
         </div>
+    );
 
-      </main>
+    const renderExam = () => (
+        <div className="h-full flex flex-col relative bg-ios-bg overflow-hidden font-sans">
+            {/* Dynamic Backgrounds */}
+            <div className="absolute top-[-10%] left-[-20%] w-[600px] h-[600px] bg-purple-100/60 rounded-full blur-[100px] animate-blob mix-blend-multiply pointer-events-none"></div>
+            <div className="absolute bottom-[-10%] right-[-20%] w-[500px] h-[500px] bg-blue-100/60 rounded-full blur-[100px] animate-blob animation-delay-2000 mix-blend-multiply pointer-events-none"></div>
 
-      {/* --- FOOTER (CONTROLS) --- */}
-      {status === ConnectionStatus.CONNECTED && (
-          <footer className="z-20 py-4 px-6 bg-ios-bg border-t border-ios-border/50 animate-slide-up">
-             {/* Simplified Footer: Just the PTT Button */}
-             <div className="flex justify-center items-center h-16">
-                 
-                 {/* PTT Button (Main Interaction) */}
+            {/* Status Overlay (Loading) */}
+            {status === ConnectionStatus.ANALYZING && (
+                 <div className="absolute inset-0 z-50 bg-white/80 backdrop-blur-md flex flex-col items-center justify-center text-ios-text animate-fade-in">
+                     <div className="relative mb-6">
+                         <div className="w-20 h-20 border-4 border-gray-100 rounded-full"></div>
+                         <div className="w-20 h-20 border-4 border-ios-blue border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
+                     </div>
+                     <h2 className="text-2xl font-bold mb-2">Exam Submitted</h2>
+                     <p className="text-ios-subtext text-sm">Generating Official Report...</p>
+                 </div>
+            )}
+            
+            {/* Header (Shrink-0) */}
+            <div className="pt-12 px-6 pb-2 flex justify-between items-center z-10 shrink-0 h-24">
+                <div className="flex items-center space-x-3">
+                    {/* Status Indicator */}
+                    <div className="flex items-center space-x-2 bg-white/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/60 shadow-sm">
+                        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                        <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest">LIVE EXAM</span>
+                    </div>
+                </div>
+                
+                {/* Finish Button - Top Right */}
+                <button 
+                    onClick={handleFinishManually}
+                    disabled={status !== ConnectionStatus.CONNECTED}
+                    className="bg-white/80 backdrop-blur-md text-ios-red border border-red-100 px-4 py-2 rounded-full text-xs font-bold shadow-sm hover:bg-red-50 active:scale-95 transition-all flex items-center space-x-1"
+                >
+                    <span className="uppercase tracking-wide">Finish Exam</span>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                </button>
+            </div>
+
+            {/* TOP SECTION: Visualizer & Cockpit (Priority: >= 2/3 of space) */}
+            <div className="flex-[3] flex flex-col items-center justify-center px-6 pt-2 pb-2 min-h-0 space-y-6 z-10">
+                {/* Visualizer (Full Size) */}
+                <div className="w-full flex-1 flex items-center justify-center overflow-visible">
+                    <div className="scale-100 transform transition-transform">
+                        <Visualizer isActive={status === ConnectionStatus.CONNECTED} audioLevel={audioLevel} />
+                    </div>
+                </div>
+                {/* Cockpit (Bottom of Top Section) */}
+                <div className="w-full shrink-0">
+                    <CockpitDisplay active={status === ConnectionStatus.CONNECTED} scenario={scenario} />
+                </div>
+            </div>
+
+            {/* MIDDLE SECTION: Situation Brief Only (Priority: <= 1/5 of space) */}
+            <div className="flex-[1] px-6 w-full min-h-0 mb-4 z-10">
+                <div className="bg-white/70 backdrop-blur-xl border border-white/60 rounded-2xl p-4 shadow-[0_8px_30px_rgba(0,0,0,0.04)] h-full flex flex-col relative overflow-hidden group">
+                    
+                    <div className="flex items-center space-x-2 mb-2 opacity-80 shrink-0">
+                        <div className="w-6 h-6 rounded-full bg-ios-blue/10 flex items-center justify-center text-ios-blue">
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <span className="text-[10px] font-bold text-ios-subtext uppercase tracking-widest">Situation Brief</span>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                        <h3 className="text-sm font-bold text-ios-text mb-1 leading-tight truncate">
+                            {scenario?.title || 'Unknown Scenario'}
+                        </h3>
+                        <div className="text-xs text-gray-700 leading-relaxed font-medium text-justify">
+                            {scenario?.details || "Scenario details are loading or unavailable. Please proceed with the examination based on the initial briefing."}
+                        </div>
+                    </div>
+                    
+                    {/* Last Transmission Block Removed as per request */}
+                </div>
+            </div>
+
+            {/* BOTTOM SECTION: PTT Button (Fixed Height, Safe Padding) */}
+            <div className="shrink-0 pt-4 pb-12 px-8 flex justify-center items-center relative z-20 bg-gradient-to-t from-ios-bg to-transparent">
                  <button
-                    onMouseDown={handlePttDown}
-                    onMouseUp={handlePttUp}
-                    onMouseLeave={handlePttUp}
-                    onTouchStart={handlePttDown}
-                    onTouchEnd={handlePttUp}
-                    onTouchCancel={handlePttUp}
+                    onMouseDown={engagePtt}
+                    onMouseUp={releasePtt}
+                    onMouseLeave={releasePtt}
+                    onTouchStart={engagePtt}
+                    onTouchEnd={releasePtt}
+                    onTouchCancel={releasePtt}
                     onContextMenu={(e) => e.preventDefault()}
-                    className={`w-full max-w-sm rounded-2xl font-bold text-lg shadow-lg transition-all duration-100 flex flex-col items-center justify-center select-none touch-none ring-offset-2 h-full
-                    ${isTransmitting 
-                        ? 'bg-ios-orange text-white scale-95 ring-2 ring-ios-orange' 
-                        : 'bg-white text-ios-text border border-gray-200 active:bg-gray-50'}`}
+                    disabled={status !== ConnectionStatus.CONNECTED}
+                    className={`
+                        group relative w-full max-w-sm h-20 rounded-full flex items-center justify-center transition-all duration-200 select-none touch-none shadow-lg
+                        ${status !== ConnectionStatus.CONNECTED ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer active:scale-95'}
+                        ${isTransmitting ? 'bg-red-500 shadow-red-200' : 'bg-white border border-gray-100 shadow-gray-200'}
+                    `}
                  >
-                    <span className="text-xl mb-0.5">
-                        {isTransmitting ? '🎙️' : '🎤'}
-                    </span>
-                    <span className="text-xs uppercase tracking-wider opacity-80">
-                        {isTransmitting ? '正在说话 (Recording...)' : '按住说话 (Hold to Speak)'}
-                    </span>
+                     <div className="flex items-center space-x-3 pointer-events-none relative z-10">
+                         <div className={`p-2 rounded-full transition-colors ${isTransmitting ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                             </svg>
+                         </div>
+                         
+                         <div className="flex flex-col items-start">
+                             <span className={`text-base font-bold uppercase tracking-wider transition-colors ${isTransmitting ? 'text-white' : 'text-ios-text'}`}>
+                                 {isTransmitting ? 'Transmitting' : 'Push to Talk'}
+                             </span>
+                             <span className={`text-[10px] font-medium transition-colors ${isTransmitting ? 'text-white/80' : 'text-gray-400'}`}>
+                                 按住说话
+                             </span>
+                         </div>
+                     </div>
+                     
+                     {isTransmitting && (
+                         <div className="absolute inset-[-6px] rounded-full border-2 border-red-500/30 animate-ping pointer-events-none"></div>
+                     )}
                  </button>
+            </div>
+        </div>
+    );
 
-             </div>
-          </footer>
-      )}
-      
-      {/* Empty Footer Placeholder when Disconnected (Optional for spacing/visual balance) */}
-      {status === ConnectionStatus.DISCONNECTED && (
-          <div className="py-6 text-center opacity-30 pointer-events-none">
-              <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Ready for Assessment</p>
-          </div>
-      )}
+    return (
+        <div className="h-full w-full bg-ios-bg overflow-hidden relative font-sans">
+            
+            {/* 1. Lobby */}
+            {view === 'lobby' && renderLobby()}
 
-    </div>
-  );
+            {/* 2. Briefing View */}
+            {view === 'briefing' && scenario && (
+                <BriefingModal 
+                    scenario={scenario}
+                    onAccept={handleAcceptBriefing}
+                    onCancel={handleAbort}
+                    onRefresh={startNewAssessmentProcess}
+                />
+            )}
+
+            {/* 3. Exam View */}
+            {view === 'exam' && renderExam()}
+
+            {/* 4. Report View */}
+            {view === 'report' && assessment && (
+                <AssessmentReport 
+                    data={assessment} 
+                    onClose={() => setView('lobby')} 
+                />
+            )}
+
+            {/* 5. Error State */}
+            {status === ConnectionStatus.ERROR && (
+                <div className="absolute inset-0 bg-white/90 backdrop-blur-md z-50 flex items-center justify-center flex-col p-8 text-center animate-fade-in">
+                    <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4 text-3xl shadow-sm">⚠️</div>
+                    <h2 className="text-xl font-bold text-gray-900 mb-2">Connection Error</h2>
+                    <p className="text-gray-500 mb-6 text-sm leading-relaxed">{errorMsg || "Unknown error occurred."}</p>
+                    <button 
+                        onClick={() => setView('lobby')}
+                        className="px-8 py-3 bg-ios-text text-white rounded-xl font-bold shadow-lg hover:scale-[1.02] active:scale-95 transition-all"
+                    >
+                        Return to Lobby
+                    </button>
+                </div>
+            )}
+
+            {/* History Modal Overlay */}
+            {showHistory && (
+                <HistoryModal 
+                    onClose={() => setShowHistory(false)}
+                    initialFilter="ASSESSMENT"
+                    onSelectReport={(data) => {
+                        setAssessment(data);
+                        setShowHistory(false);
+                        setView('report');
+                    }}
+                />
+            )}
+
+        </div>
+    );
 };
 
 export default AssessmentScreen;
