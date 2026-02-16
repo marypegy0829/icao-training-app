@@ -39,6 +39,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
 
     // Live Client Refs
     const liveClientRef = useRef<LiveClient | null>(null);
+    // NEW: Session ID Ref to prevent ghost callbacks
+    const currentSessionIdRef = useRef<string>("");
+
     const startTimeRef = useRef<number>(0);
     
     // Inactivity Tracking (3 Minutes Rule)
@@ -56,7 +59,11 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            handleAbort(); 
+            // Force cleanup on unmount
+            if (liveClientRef.current) {
+                liveClientRef.current.disconnect();
+                liveClientRef.current = null;
+            }
         };
     }, []);
 
@@ -100,6 +107,9 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
     };
 
     const startExam = async (examScenario: Scenario, airportCode: string) => {
+        // 0. Prevent Double Clicks
+        if (status === ConnectionStatus.CONNECTING) return;
+
         // Fetch API Key (from DB or Env)
         const apiKey = await configService.getGoogleApiKey();
         
@@ -108,6 +118,16 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             setStatus(ConnectionStatus.ERROR);
             return;
         }
+
+        // 1. STRICT TEARDOWN: Kill previous instance to prevent ghost connections
+        if (liveClientRef.current) {
+            liveClientRef.current.disconnect();
+            liveClientRef.current = null;
+        }
+
+        // 2. SESSION TOKEN GENERATION
+        const sessionId = Date.now().toString();
+        currentSessionIdRef.current = sessionId;
 
         // Ensure state is synced
         setScenario(examScenario);
@@ -156,22 +176,29 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             examScenario,
             {
                 onOpen: () => {
+                    if (currentSessionIdRef.current !== sessionId) return; // GUARD
                     setStatus(ConnectionStatus.CONNECTED);
                     startTimeRef.current = Date.now();
                     updateActivity();
                 },
                 onClose: () => {
+                   if (currentSessionIdRef.current !== sessionId) return; // GUARD
                    if (status !== ConnectionStatus.ANALYZING && status !== ConnectionStatus.ERROR) {
                        // Expected close logic
                    }
                 },
                 onError: (err) => {
+                    if (currentSessionIdRef.current !== sessionId) return; // GUARD
                     setStatus(ConnectionStatus.ERROR);
                     setErrorMsg(err.message);
                     setIsProcessing(false); // Force clear on error
                 },
-                onAudioData: (level) => setAudioLevel(level),
+                onAudioData: (level) => {
+                    if (currentSessionIdRef.current !== sessionId) return; // GUARD
+                    setAudioLevel(level);
+                },
                 onTurnComplete: () => {
+                    if (currentSessionIdRef.current !== sessionId) return; // GUARD
                     setAudioLevel(0);
                     updateActivity();
                     // CRITICAL FIX: Ensure processing state is cleared when turn completes
@@ -179,6 +206,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     setIsProcessing(false); 
                 },
                 onTranscript: (text, role, isPartial) => {
+                    if (currentSessionIdRef.current !== sessionId) return; // GUARD
                     updateActivity(); // User speaking or AI responding counts as activity
                     
                     // NEW: If AI starts speaking, stop the "Processing" indicator
@@ -210,6 +238,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     });
                 },
                 onAssessment: (data) => {
+                    if (currentSessionIdRef.current !== sessionId) return; // GUARD
                     setAssessment(data);
                     setStatus(ConnectionStatus.DISCONNECTED);
                     liveClientRef.current?.disconnect();
@@ -447,8 +476,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                 <div className="flex items-center space-x-3">
                     {/* Status Indicator */}
                     <div className="flex items-center space-x-2 bg-white/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/60 shadow-sm">
-                        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                        <span className="text-[10px] font-bold text-red-500 uppercase tracking-widest">{t.liveExam}</span>
+                        <div className="w-2 h-2 rounded-full bg-red-50 animate-pulse"></div>
+                        <span className="text-[10px] font-bold text-red-50 uppercase tracking-widest">{t.liveExam}</span>
                     </div>
                 </div>
                 

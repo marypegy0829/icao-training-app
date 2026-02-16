@@ -88,6 +88,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   const lastInputTimeRef = useRef<number>(0);
   
   const liveClientRef = useRef<LiveClient | null>(null);
+  // NEW: Session ID Ref to prevent ghost callbacks
+  const currentSessionIdRef = useRef<string>("");
 
   // --- Effects for Session ---
 
@@ -102,7 +104,11 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     loadScenarios();
 
     return () => {
-      liveClientRef.current?.disconnect();
+      // Force cleanup on unmount
+      if (liveClientRef.current) {
+          liveClientRef.current.disconnect();
+          liveClientRef.current = null;
+      }
     };
   }, []);
 
@@ -252,12 +258,25 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   };
 
   const startTraining = async (scenario: Scenario) => {
+    // 0. Prevent Double Clicks
+    if (status === ConnectionStatus.CONNECTING) return;
+
     // Fetch API Key
     const apiKey = await configService.getGoogleApiKey();
     if (!apiKey) {
        alert("API Key missing. Check Supabase config.");
        return;
     }
+
+    // 1. STRICT TEARDOWN: Kill previous instance to prevent ghost connections
+    if (liveClientRef.current) {
+        liveClientRef.current.disconnect();
+        liveClientRef.current = null;
+    }
+
+    // 2. SESSION TOKEN GENERATION
+    const sessionId = Date.now().toString();
+    currentSessionIdRef.current = sessionId;
 
     // --- ACCENT FIX: Ensure we have an airport code ---
     let sessionAirportCode = airportCode;
@@ -350,11 +369,13 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     // Pass difficulty, airport, accent, NOISE, RULES and LANGUAGE
     await liveClientRef.current.connect(scenario, {
       onOpen: () => {
+          if (currentSessionIdRef.current !== sessionId) return; // GUARD
           setStatus(ConnectionStatus.CONNECTED);
           startTimeRef.current = Date.now();
           lastInputTimeRef.current = Date.now();
       },
       onClose: () => {
+         if (currentSessionIdRef.current !== sessionId) return; // GUARD
          if (statusRef.current === ConnectionStatus.ANALYZING) {
              return;
          }
@@ -364,10 +385,12 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
          }
       },
       onError: (err) => {
+          if (currentSessionIdRef.current !== sessionId) return; // GUARD
           setStatus(ConnectionStatus.ERROR);
           setErrorMsg(err.message);
       },
       onAudioData: (level) => {
+          if (currentSessionIdRef.current !== sessionId) return; // GUARD
           setAudioLevel(level);
           // Update inactivity timer if audio detected (threshold to avoid silence noise)
           if (level > 0.2) {
@@ -375,11 +398,14 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           }
       },
       onTurnComplete: () => {
+          if (currentSessionIdRef.current !== sessionId) return; // GUARD
           setAudioLevel(0);
           // End of turn: Next AI speech should be a new paragraph
           isAiTurnStart = true;
       },
       onTranscript: (text, role, isPartial) => {
+          if (currentSessionIdRef.current !== sessionId) return; // GUARD
+
           // Reset inactivity timer on user interaction
           if (role === 'user') {
               lastInputTimeRef.current = Date.now();
@@ -419,6 +445,7 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
           }
       },
       onAssessment: (data) => {
+          if (currentSessionIdRef.current !== sessionId) return; // GUARD
           setAssessment(data);
           // FIX: Pass the local 'scenario' variable to avoid closure trap where activeScenario state might be null
           saveToSupabase(data, scenario);

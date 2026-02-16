@@ -505,7 +505,9 @@ export class LiveClient {
             // If AI is currently speaking, block the mic to prevent feedback loop.
             if (this.outputAudioContext) {
                 // Check if playback queue is still active
-                const isAiSpeaking = this.outputAudioContext.currentTime < this.nextStartTime;
+                // ADDED: 500ms Squelch Tail (Physical Echo Protection)
+                // Wait for audio to physically leave speaker and dissipate before opening mic
+                const isAiSpeaking = this.outputAudioContext.currentTime < (this.nextStartTime + 0.5); 
                 if (isAiSpeaking) {
                     // console.debug("Mic gated due to AI playback (Half-Duplex)");
                     return; 
