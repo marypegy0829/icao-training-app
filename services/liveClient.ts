@@ -78,7 +78,10 @@ export class LiveClient {
   private processor: ScriptProcessorNode | null = null;
   private outputNode: GainNode | null = null;
   private stream: MediaStream | null = null;
+  
+  // Audio State Tracking
   private nextStartTime = 0;
+  private activeSources: AudioBufferSourceNode[] = [];
   
   public isRecording = false;
   public isBufferedMode = false;
@@ -465,7 +468,17 @@ export class LiveClient {
 
   private async initAudioInputStream() {
     try {
-        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Enforce strict audio constraints for Echo Cancellation
+        this.stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                sampleRate: 16000,
+                channelCount: 1,
+                echoCancellation: true,      // CRITICAL: Request hardware/software AEC
+                noiseSuppression: true,      // CRITICAL: Reduce background noise
+                autoGainControl: true        // CRITICAL: Normalize input levels
+            }
+        });
+        
         if (!this.inputAudioContext) return;
 
         this.inputSource = this.inputAudioContext.createMediaStreamSource(this.stream);
@@ -482,9 +495,21 @@ export class LiveClient {
             const rms = Math.sqrt(sum / inputData.length);
             this.callbacks?.onAudioData(rms * 5); 
 
-            // Logic: Muted / PTT / Open Mic
+            // Logic: Muted / PTT
             if (this.isInputMuted && !this.isRecording) {
                 return; // Drop data
+            }
+
+            // Logic: Software Gating (Half-Duplex)
+            // Universally applies to BOTH Buffered (Assessment) and Open Mic (Training) modes.
+            // If AI is currently speaking, block the mic to prevent feedback loop.
+            if (this.outputAudioContext) {
+                // Check if playback queue is still active
+                const isAiSpeaking = this.outputAudioContext.currentTime < this.nextStartTime;
+                if (isAiSpeaking) {
+                    // console.debug("Mic gated due to AI playback (Half-Duplex)");
+                    return; 
+                }
             }
 
             this.sendRealtimeInput(inputData);
@@ -524,14 +549,36 @@ export class LiveClient {
         source.buffer = buffer;
         source.connect(this.outputNode);
 
+        // Track active source for cancellation
+        source.onended = () => {
+            this.activeSources = this.activeSources.filter(s => s !== source);
+        };
+        this.activeSources.push(source);
+
         const now = this.outputAudioContext.currentTime;
-        this.nextStartTime = Math.max(this.nextStartTime, now);
-        source.start(this.nextStartTime);
-        this.nextStartTime += buffer.duration;
+        // Ensure gapless or immediate playback
+        const startTime = Math.max(this.nextStartTime, now);
+        source.start(startTime);
+        
+        // Update the pointer for when the audio will finish
+        this.nextStartTime = startTime + buffer.duration;
 
     } catch (e) {
         console.error("Audio playback error", e);
     }
+  }
+
+  // Halt all current audio playback immediately (simulate PTT override)
+  cancelOutput() {
+      this.activeSources.forEach(s => {
+          try { s.stop(); } catch(e) { /* ignore already stopped */ }
+      });
+      this.activeSources = [];
+      
+      // Reset the time pointer so the Software Gate opens immediately
+      if (this.outputAudioContext) {
+          this.nextStartTime = this.outputAudioContext.currentTime;
+      }
   }
 
   async startRecording() {
@@ -547,6 +594,10 @@ export class LiveClient {
               console.warn("Failed to resume input context:", e);
           }
       }
+
+      // CRITICAL FIX: Stop any incoming audio when user presses PTT (Half-Duplex)
+      // This prevents the mic from picking up the speaker output.
+      this.cancelOutput();
 
       if (this.isBufferedMode) {
           this.isRecording = true;
@@ -595,6 +646,8 @@ export class LiveClient {
   }
 
   disconnect() {
+      this.cancelOutput(); // Stop any playing audio
+      
       if (this.suspendTimer) clearTimeout(this.suspendTimer);
       
       if (this.processor) {

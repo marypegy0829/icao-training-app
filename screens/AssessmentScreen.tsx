@@ -341,7 +341,7 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
             </div>
 
             {/* Content Body */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 relative z-10">
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6 relative z-10 pb-20">
                 
                 {/* Hero Card */}
                 <div className="bg-white rounded-[2rem] p-6 shadow-soft border border-gray-100 relative overflow-hidden group">
@@ -365,6 +365,21 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                     </div>
                 </div>
 
+                {/* Start Button Area (Moved UP) */}
+                <div className="py-2">
+                    <button 
+                        onClick={startNewAssessmentProcess}
+                        className="w-full bg-gradient-to-r from-ios-blue to-ios-indigo text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center relative overflow-hidden"
+                    >
+                        <span className="relative z-10">{t.begin}</span>
+                        <svg className="w-5 h-5 ml-2 relative z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                        </svg>
+                        {/* Shine Effect */}
+                        <div className="absolute top-0 left-[-100%] w-full h-full bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_2s_infinite]"></div>
+                    </button>
+                </div>
+
                 {/* Criteria Grid */}
                 <div>
                     <h3 className="text-xs font-bold text-ios-subtext uppercase tracking-widest mb-4 px-1">{t.scoring}</h3>
@@ -378,29 +393,14 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
                             { name: 'Interactions', icon: '🤝', color: 'bg-indigo-50 text-indigo-600' },
                         ].map((item) => (
                             <div key={item.name} className="bg-white p-3 rounded-2xl shadow-sm border border-gray-50 flex items-center space-x-3">
-                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm ${item.color}`}>
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg ${item.color}`}>
                                     {item.icon}
                                 </div>
-                                <span className="text-xs font-bold text-gray-700">{item.name}</span>
+                                <span className="text-sm font-bold text-gray-700">{item.name}</span>
                             </div>
                         ))}
                     </div>
                 </div>
-            </div>
-
-            {/* Start Button Area (Fixed Bottom) */}
-            <div className="p-6 bg-ios-bg/90 backdrop-blur-md border-t border-gray-100 z-20">
-                <button 
-                    onClick={startNewAssessmentProcess}
-                    className="w-full bg-ios-text text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-gray-200 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center relative overflow-hidden"
-                >
-                    <span className="relative z-10">{t.begin}</span>
-                    <svg className="w-5 h-5 ml-2 relative z-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                    </svg>
-                    {/* Shine Effect */}
-                    <div className="absolute top-0 left-[-100%] w-full h-full bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_2s_infinite]"></div>
-                </button>
             </div>
         </div>
     );
