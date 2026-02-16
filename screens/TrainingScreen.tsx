@@ -630,14 +630,13 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
             </button>
         </div>
 
-        {/* Main Layout Container */}
-        {/* CHANGED: px-4 horizontal padding, pb-0 to let card touch bottom, overflow-hidden to clip wobble */}
-        <div className="flex-1 flex flex-col relative z-10 overflow-hidden px-4 pt-2 pb-0 min-h-0">
+        {/* Main Layout Container - Takes remaining height, Absolute Positioning for robustness */}
+        <div className="flex-1 relative z-10 w-full overflow-hidden">
             
-            {/* 1. TOP SECTION: Visuals & Cockpit (Height Increased to 45%, Spacing increased) */}
-            <div className="h-[45%] shrink-0 flex flex-col items-center justify-end space-y-6 pb-2">
+            {/* 1. TOP SECTION (45% of space) - Absolute Top */}
+            <div className="absolute top-0 left-0 right-0 h-[45%] flex flex-col items-center justify-end pb-6 px-4 space-y-6">
                 {/* Visualizer (Takes available space in this section) */}
-                <div className="flex-1 w-full flex items-center justify-center overflow-visible relative">
+                <div className="flex-1 w-full flex items-center justify-center overflow-visible min-h-0 relative">
                     <div className="scale-[0.8] transform transition-transform">
                         <Visualizer isActive={status === ConnectionStatus.CONNECTED || status === ConnectionStatus.ANALYZING} audioLevel={audioLevel} />
                     </div>
@@ -648,10 +647,10 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
                 </div>
             </div>
 
-            {/* 2. BOTTOM SECTION: Combined Data Pad (Drawer Style - Locked to Bottom) */}
-            <div className="flex-1 min-h-0 flex flex-col w-full relative">
+            {/* 2. BOTTOM SECTION (55% of space) - Absolute Fixed at Bottom */}
+            <div className="absolute bottom-0 left-0 right-0 h-[55%] px-4">
                 {/* Card Container: Rounded Top, Flat Bottom, Full Height */}
-                <div className="absolute inset-0 bg-white/70 backdrop-blur-xl border-t border-x border-white/60 rounded-t-[2.5rem] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
+                <div className="w-full h-full bg-white/70 backdrop-blur-xl border-t border-x border-white/60 rounded-t-[2.5rem] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
                     
                     {/* A. SITUATION BRIEF HEADER (Fixed Top of Card) */}
                     <div className="p-4 border-b border-white/50 shrink-0 bg-white/30 backdrop-blur-sm">
