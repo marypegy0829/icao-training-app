@@ -1,20 +1,37 @@
+
 <div align="center">
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# ICAO Level 5 ATC Examiner
 
-This contains everything you need to run your app locally.
+A realistic AI-driven aviation English examination simulator focusing on ICAO Level 5 standards (Emergency & Non-routine situations).
 
-View your app in AI Studio: https://ai.studio/apps/drive/1PAeuWluOYVNRuqaKFca3QBEagyR3DaaG
+## Security Notice 🔒
+
+**API Keys are no longer stored in the frontend code or `.env` files.**
+To run this application, you must configure your Gemini API Key in the Supabase Database.
 
 ## Run Locally
 
 **Prerequisites:**  Node.js
 
+1.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+2.  **Configure Environment:**
+    Ensure `.env` contains your Supabase credentials:
+    ```
+    VITE_SUPABASE_URL=...
+    VITE_SUPABASE_KEY=...
+    ```
+
+3.  **Configure Database Secrets:**
+    Run the `SUPABASE_SECRETS.sql` script in your Supabase SQL Editor, replacing `'INSERT_YOUR_REAL_GEMINI_KEY_HERE'` with your actual Gemini API Key.
+
+4.  **Run the app:**
+    ```bash
+    npm run dev
+    ```
