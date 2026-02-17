@@ -5,7 +5,6 @@ import { SCENARIO_CATEGORIES, ScenarioCategory, PHASE_LOGIC_CONFIG, TrainingTag 
 import { scenarioService } from '../services/scenarioService';
 import { airportService, Airport } from '../services/airportService';
 import { ruleService } from '../services/ruleService';
-import { configService } from '../services/configService'; // Import configService
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, FlightPhase, DifficultyLevel, AppLanguage } from '../types';
 import Visualizer from '../components/Visualizer';
 import CockpitDisplay from '../components/CockpitDisplay';
@@ -47,8 +46,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
   
   // Selection State
   const [selectedPhase, setSelectedPhase] = useState<FlightPhase | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<ScenarioCategory | null>(null);
   const [selectedTag, setSelectedTag] = useState<TrainingTag | null>(null); // New Tag Filter
+  const [selectedCategory, setSelectedCategory] = useState<ScenarioCategory | null>(null); // Legacy support
   const [airportCode, setAirportCode] = useState<string>('');
   const [activeAirport, setActiveAirport] = useState<Airport | null>(null); // Full Airport Object
   
@@ -262,13 +261,6 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     // 0. Prevent Double Clicks
     if (status === ConnectionStatus.CONNECTING) return;
 
-    // Fetch API Key
-    const apiKey = await configService.getGoogleApiKey();
-    if (!apiKey) {
-       alert("API Key missing. Check Supabase config.");
-       return;
-    }
-
     // 1. STRICT TEARDOWN: Kill previous instance to prevent ghost connections
     if (liveClientRef.current) {
         liveClientRef.current.disconnect();
@@ -322,8 +314,8 @@ const TrainingScreen: React.FC<TrainingScreenProps> = ({
     startTimeRef.current = Date.now();
     lastInputTimeRef.current = Date.now(); // Reset inactivity timer
 
-    // Initialize LiveClient (Key is now dynamic)
-    liveClientRef.current = new LiveClient(apiKey);
+    // Initialize LiveClient (Key is now env based)
+    liveClientRef.current = new LiveClient();
     
     // TRAINING MODE: Always Open Mic, No PTT buffering
     liveClientRef.current.setBufferedMode(false);

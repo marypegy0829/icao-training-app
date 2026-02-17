@@ -3,6 +3,7 @@ import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } f
 import { Scenario, AppLanguage } from "../types";
 import { createPcmBlob, decodeAudioData, normalizeAudio } from "./audioUtils";
 import { airportService } from "./airportService";
+import { configService } from "./configService";
 
 interface LiveClientCallbacks {
   onOpen: () => void;
@@ -69,7 +70,7 @@ const assessmentTool: FunctionDeclaration = {
 };
 
 export class LiveClient {
-  private client: GoogleGenAI;
+  private client: GoogleGenAI | null = null;
   private sessionPromise: Promise<any> | null = null;
   
   private inputAudioContext: AudioContext | null = null;
@@ -93,11 +94,9 @@ export class LiveClient {
   
   private callbacks: LiveClientCallbacks | null = null;
 
-  constructor(apiKey: string) {
-    if (!apiKey) {
-        throw new Error("LiveClient initialized without API Key");
-    }
-    this.client = new GoogleGenAI({ apiKey });
+  constructor() {
+    // Hidden Design: Do NOT initialize client here with hardcoded env vars.
+    // Initialization happens in connect() after fetching key dynamically.
   }
 
   // --- REGION 1: ACCENT & VOICE LOGIC ---
@@ -112,7 +111,6 @@ export class LiveClient {
 
       // 1. Deep / Authoritative Male Voices (Fenrir)
       // Suitable for: Mainland China (Z), SE Asia (V), Russia (U)
-      // EXCLUDED: Korea (RK) and Japan (RJ) to allow for lighter/clearer Asian accents using Charon
       if (['Z', 'V', 'U'].includes(prefix1)) {
           return 'Fenrir';
       }
@@ -135,7 +133,6 @@ export class LiveClient {
 
   /**
    * Generates the Voice Style, Speed, and Accent instruction based on Difficulty Level.
-   * This couples the "Regional Accent" logic with the "Training Difficulty".
    */
   private getAccentInstruction(airportCode: string, enabled: boolean, difficulty: string): string {
       const code = airportCode ? airportCode.toUpperCase() : 'XXXX';
@@ -148,26 +145,25 @@ export class LiveClient {
       let accentIntensity = "";
 
       if (difficulty.includes("Level 3")) {
-          // LEVEL 3-4 (Upgrade): Slow, Clear, Educational
-          speedInstruction = "**SPEAKING RATE**: SLOW (approx 90-100 WPM). Leave distinct pauses between instructions.";
-          clarityInstruction = "**ARTICULATION**: TEXTBOOK PERFECT. Enunciate every syllable clearly.";
-          accentIntensity = "NEUTRAL / STANDARD ICAO. Suppress regional accents for clarity.";
+          // LEVEL 3-4
+          speedInstruction = "**SPEAKING RATE**: SLOW (approx 90-100 WPM). Leave distinct pauses.";
+          clarityInstruction = "**ARTICULATION**: TEXTBOOK PERFECT. Enunciate every syllable.";
+          accentIntensity = "NEUTRAL / STANDARD ICAO. Suppress regional accents.";
       } else if (difficulty.includes("Recurrent")) {
-          // LEVEL 4 (Recurrent): Normal, Professional
+          // LEVEL 4
           speedInstruction = "**SPEAKING RATE**: NORMAL / STANDARD (approx 115-125 WPM).";
           clarityInstruction = "**ARTICULATION**: Professional and clear.";
-          // UPDATED: Make accents more noticeable even at Level 4 if explicitly enabled
           accentIntensity = enabled ? "DISTINCT REGIONAL ACCENT. Authentic but intelligible." : "STANDARD ICAO.";
       } else if (difficulty.includes("Level 4 → 5")) {
-          // LEVEL 5 (Upgrade): Fast, Natural
+          // LEVEL 5
           speedInstruction = "**SPEAKING RATE**: FAST (approx 135-145 WPM). Efficient delivery.";
           clarityInstruction = "**ARTICULATION**: Natural flow. Use standard contractions/reductions.";
           accentIntensity = enabled ? "MODERATE-HEAVY REGIONAL ACCENT. Authentic local intonation." : "MILDLY BUSY TONE.";
       } else {
-          // LEVEL 6 (Examiner): Very Fast, High Workload, Heavy Accent
+          // LEVEL 6
           speedInstruction = "**SPEAKING RATE**: VERY FAST / BUSY (150+ WPM). Rapid-fire delivery.";
-          clarityInstruction = "**ARTICULATION**: Clipped, hurried, 'Radio Voice'. Mimic high-workload fatigue.";
-          accentIntensity = "HEAVY / AUTHENTIC LOCAL ACCENT. Use local cadence. Challenge the pilot's ear.";
+          clarityInstruction = "**ARTICULATION**: Clipped, hurried, 'Radio Voice'.";
+          accentIntensity = "HEAVY / AUTHENTIC LOCAL ACCENT. Challenge the pilot's ear.";
       }
 
       // 2. Generate Base Instruction
@@ -179,82 +175,61 @@ export class LiveClient {
 - **ACCENT INTENSITY**: ${accentIntensity}
 `;
 
-      // If accents are disabled OR difficulty is very low, return generic ICAO
-      // EXCEPTION: If user explicitly provided a non-standard ICAO code, we imply they might want context, but we respect the toggle mostly.
       if ((!enabled && !difficulty.includes("Level 6")) || difficulty.includes("Level 3")) {
           return `${base}\n- **STYLE**: Use Standard ICAO English. Neutral and clear.`;
       }
 
-      // 3. Region Specific Instructions (Only if enabled or High Difficulty)
+      // 3. Region Specific Instructions
       let regionSpecifics = "";
 
-      // --- ASIA ---
       if (prefix1 === 'Z') { // China
           regionSpecifics = `
 ### **🌏 REGION Z (China) - "Beijing/Shanghai Control"**
 * **Phonology**: /θ/ -> /s/ (Three -> Sree), /v/ -> /w/. Final consonants often swallowed.
-* **Prosody**: Staccato rhythm. High volume. Authoritative.
-* **Lexical**: Strict "DAY-SEE-MAL", "Standby".`;
+* **Prosody**: Staccato rhythm. High volume. Authoritative.`;
       }
       else if (prefix === 'RK') { // Korea
           regionSpecifics = `
 ### **🌏 REGION RK (Korea) - "Incheon Control"**
-* **ACTING**: You are a Korean ATC. Speak English with a distinct Korean accent.
-* **Phonology**: 
-  - SUBSTITUTE 'F' with 'P' strongly (e.g., "Frequency" -> "Prequency", "Four" -> "Pour").
-  - SUBSTITUTE 'R' and 'L' often.
-  - Short vowels (e.g., "Ready" -> "Red-dy").
-* **Prosody**: Syllable-timed. Distinct **rising intonation** at the end of phrases (high-low-high). 
-* **Style**: Formal, efficient, slightly hurried.`;
+* **ACTING**: Distinct Korean accent.
+* **Phonology**: Substitute 'F' with 'P' (Frequency -> Prequency). Substitute 'R'/'L'.
+* **Prosody**: Syllable-timed. Rising intonation at end.`;
       }
       else if (prefix1 === 'V') { // India / SE Asia
           regionSpecifics = `
-### **🌏 REGION V (India/Thailand) - "Mumbai/Bangkok Control"**
-* **Phonology**: Retroflex T/D (curled tongue). W/V merger.
-* **Prosody**: Musical/Sing-song rhythm. Very fast pace.
-* **Lexical**: "Confirm" used often.`;
+### **🌏 REGION V (India/Thailand)**
+* **Phonology**: Retroflex T/D. W/V merger.
+* **Prosody**: Musical/Sing-song rhythm. Very fast pace.`;
       }
       else if (prefix === 'RJ' || prefix === 'RO') { // Japan
           regionSpecifics = `
-### **🌏 REGION RJ (Japan) - "Tokyo Control"**
-* **Phonology**: Katakana effect (Street -> Sutorito). R/L merger. 
-* **Prosody**: Monotonic, flat rhythm, robot-like precision. Very polite.
-* **Pronunciation**: Add vowels to consonant clusters (e.g. "Golf" -> "Golu-fu").`;
+### **🌏 REGION RJ (Japan)**
+* **Phonology**: Katakana effect (Street -> Sutorito).
+* **Prosody**: Monotonic, flat rhythm, robot-like precision.`;
       }
-
-      // --- MIDDLE EAST & AFRICA ---
       else if (prefix1 === 'O' || ['HE', 'HA', 'DT', 'DA'].includes(prefix)) { // Middle East
           regionSpecifics = `
-### **🌏 REGION O/H (Middle East) - "Dubai/Cairo Control"**
-* **Phonology**: Guttural /h/ and /k/. P/B confusion (Parking -> Barking). Trilled R.
-* **Prosody**: Deep, resonant, deliberate pace.`;
+### **🌏 REGION O/H (Middle East)**
+* **Phonology**: Guttural /h/ and /k/. P/B confusion (Parking -> Barking). Trilled R.`;
       }
-
-      // --- SOUTH AMERICA ---
       else if (prefix1 === 'S' || prefix1 === 'M') { // Latin America
           regionSpecifics = `
-### **🌎 REGION S/M (Latin America) - "Bogota/Sao Paulo/Mexico"**
+### **🌎 REGION S/M (Latin America)**
 * **Phonology**: Vowel insertion before S-clusters (Station -> E-station). H is silent.
-* **Prosody**: Rapid machine-gun rhythm. Spanish-influenced cadence.`;
+* **Prosody**: Rapid machine-gun rhythm.`;
       }
-
-      // --- RUSSIA ---
       else if (prefix1 === 'U') { // Russia
           regionSpecifics = `
-### **🌏 REGION U (Russia) - "Moscow Control"**
-* **Phonology**: No /th/ sound (Three -> Tree/Zree). Rolling R. Heavy articulation.
-* **Prosody**: Falling intonation. Serious, somber tone.`;
+### **🌏 REGION U (Russia)**
+* **Phonology**: No /th/ sound (Three -> Tree). Rolling R. Heavy articulation.
+* **Prosody**: Falling intonation. Serious tone.`;
       }
-
-      // --- EUROPE ---
       else if (prefix === 'LF') { // France
           regionSpecifics = `
-### **🌏 REGION E (France) - "Paris Control"**
-* **Phonology**: H-dropping ('Eading). Th -> Z (The -> Ze). Uvular R.
-* **Prosody**: Stress on last syllable.`;
+### **🌏 REGION E (France)**
+* **Phonology**: H-dropping. Th -> Z. Uvular R.`;
       }
       
-      // If no specific region matched but accent is enabled/high difficulty
       if (!regionSpecifics && (enabled || difficulty.includes("Level 6"))) {
           regionSpecifics = `- **STYLE**: Use a slight regional touch appropriate for ${code}.`;
       }
@@ -275,6 +250,32 @@ export class LiveClient {
   ) {
     this.callbacks = callbacks;
 
+    // --- KEY FETCHING LOGIC (HIDDEN DESIGN) ---
+    // 1. Try Config Service (DB or Env)
+    let apiKey = await configService.getGoogleApiKey();
+    let source = "Database";
+    
+    if (!apiKey || apiKey.includes("YOUR_ACTUAL_GEMINI_KEY")) {
+        console.warn("LiveClient: Invalid Key from ConfigService, checking process.env fallback.");
+        // 2. Final Fallback to process.env directly (if configService failed)
+        apiKey = process.env.API_KEY;
+        source = "Environment (.env)";
+    }
+
+    if (!apiKey) {
+        const msg = "API Key Missing. Please check .env file or Supabase config.";
+        console.error(msg);
+        this.callbacks?.onError(new Error(msg));
+        return;
+    }
+
+    // DEBUG: Verify Key Prefix
+    const maskedKey = apiKey.substring(0, 8) + '...';
+    console.log(`LiveClient: Connecting using API Key from ${source} (${maskedKey})`);
+
+    // Initialize Client with resolved key
+    this.client = new GoogleGenAI({ apiKey });
+
     // Audio Context Setup
     this.inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
     this.outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -287,10 +288,7 @@ export class LiveClient {
         try {
             const airport = await airportService.getAirportByCode(airportCode);
             if (airport) {
-                // Construct a rich context block for the AI
                 const rwList = airport.runways ? airport.runways.join(', ') : 'Standard';
-                
-                // Format Frequencies for AI Prompt
                 let freqList = "";
                 if (airport.frequencies) {
                     freqList = Object.entries(airport.frequencies)
@@ -299,8 +297,6 @@ export class LiveClient {
                 } else {
                     freqList = "- TOWER: 118.100 MHz\n- GROUND: 121.900 MHz\n- APP: 119.700 MHz";
                 }
-
-                // Format Procedures
                 let procList = "Standard Procedures";
                 if (airport.procedures) {
                     const sids = airport.procedures.sids ? `SIDs: ${airport.procedures.sids.join(', ')}` : '';
@@ -320,38 +316,32 @@ export class LiveClient {
     ${procList}
     
     ⚠️ **SCENARIO ADAPTATION REQUIRED**:
-    The scenario details provided may use generic or incorrect runway/taxiway designators (e.g. "36R", "Alpha").
-    YOU MUST ADAPT the scenario to use REAL runways and taxiways from the ${airport.icao_code} data above.
-    Example: If scenario says "Taxi to 36R" but ${airport.icao_code} only has "09/27", clear the pilot to "Runway 27" instead.
-    MAINTAIN THE CORE CONFLICT (e.g. Incursion, Fire) but place it in the correct GEOMETRY.
-    USE CORRECT UNIT NAMES (e.g., "${airport.city} Tower" instead of "Tower").
+    Adapt scenario runway/taxiways to REAL data from ${airport.icao_code} above.
+    Maintain core conflict but map to correct geometry.
     `;
             }
         } catch (e) {
-            console.warn("LiveClient: Failed to load airport data for context injection", e);
+            console.warn("LiveClient: Failed to load airport data", e);
         }
     }
 
-    // 2. Generate Voice & Accent Config (Now Coupled with Difficulty)
+    // 2. Generate Voice & Accent Config
     const voiceName = this.getVoiceName(airportCode, accentEnabled);
-    // PASS DIFFICULTY HERE
     const accentPrompt = this.getAccentInstruction(airportCode, accentEnabled, difficulty);
 
     // 3. Language & Reporting Instruction
     const langInstruction = language === 'cn' 
         ? `
-        *** REPORTING LANGUAGE CONFIGURATION (IMPORTANT) ***
-        When calling 'reportAssessment' tool, YOU MUST:
-        1. Write the 'assessment', 'safetyMargin', 'frictionPoints', 'theory', 'rootCause', and 'explanation' fields in SIMPLIFIED CHINESE (简体中文).
-        2. KEEP any direct quotes, transcripts, or specific aviation phraseology examples in ENGLISH.
-        3. The goal is to explain the concepts to a Chinese speaker, but show the English mistakes clearly.
+        *** REPORTING LANGUAGE CONFIGURATION ***
+        When calling 'reportAssessment', WRITE 'assessment', 'safetyMargin', 'frictionPoints', 'theory', 'rootCause', and 'explanation' in SIMPLIFIED CHINESE.
+        KEEP quotes/transcripts in ENGLISH.
         `
         : `
         *** REPORTING LANGUAGE CONFIGURATION ***
         All content in 'reportAssessment' MUST be in ENGLISH.
         `;
 
-    // 4. Build System Instruction with all contexts
+    // 4. Build System Instruction
     const systemInstruction = `
     ${coachingInstruction}
     
@@ -370,7 +360,6 @@ export class LiveClient {
     ${langInstruction}
     `;
 
-    // Local accumulation for transcripts
     let currentInputTranscription = "";
 
     const config = {
@@ -379,11 +368,10 @@ export class LiveClient {
             responseModalities: [Modality.AUDIO],
             systemInstruction: systemInstruction,
             speechConfig: {
-                // Dynamically set the voice based on region
                 voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName } },
             },
-            inputAudioTranscription: {}, // Enable Input Transcription
-            outputAudioTranscription: {}, // Enable Output Transcription
+            inputAudioTranscription: {}, 
+            outputAudioTranscription: {}, 
             tools: [{ functionDeclarations: [assessmentTool] }],
         },
         callbacks: {
@@ -393,7 +381,7 @@ export class LiveClient {
                 this.callbacks?.onOpen();
             },
             onmessage: async (message: LiveServerMessage) => {
-                // 1. Handle Tool Calls (Assessment)
+                // 1. Handle Tool Calls
                 if (message.toolCall) {
                     console.log("Tool Call Received:", message.toolCall);
                     for (const fc of message.toolCall.functionCalls) {
@@ -419,7 +407,6 @@ export class LiveClient {
                 }
 
                 // 3. Handle Transcript
-                // Input (User)
                 if (message.serverContent?.inputTranscription) {
                     const text = message.serverContent.inputTranscription.text;
                     if (text) {
@@ -428,17 +415,15 @@ export class LiveClient {
                     }
                 }
                 
-                // Output (Model)
                 if (message.serverContent?.outputTranscription) {
                     const text = message.serverContent.outputTranscription.text;
                     if (text) {
-                        this.callbacks?.onTranscript(text, 'ai', false); // AI chunks are appended by frontend logic
+                        this.callbacks?.onTranscript(text, 'ai', false); 
                     }
                 }
 
-                // 4. Handle Turn Complete
+                // 4. Turn Complete
                 if (message.serverContent?.turnComplete) {
-                    // Finalize user input state
                     if (currentInputTranscription) {
                         this.callbacks?.onTranscript(currentInputTranscription, 'user', false);
                         currentInputTranscription = "";
@@ -451,8 +436,18 @@ export class LiveClient {
                 this.callbacks?.onClose();
             },
             onerror: (err: any) => {
+                let msg = err.message || "Unknown Connection Error";
+                // Friendly error for Leaked Keys / 403
+                if (
+                    msg.includes("403") || 
+                    msg.includes("API key") || 
+                    msg.includes("leaked") ||
+                    msg.includes("expired")
+                ) {
+                    msg = `API Key Error: Key is invalid/LEAKED (${maskedKey}). Please restart 'npm run dev'.`;
+                }
                 console.error("LiveClient: Error", err);
-                this.callbacks?.onError(err);
+                this.callbacks?.onError(new Error(msg));
             }
         }
     };
@@ -468,14 +463,18 @@ export class LiveClient {
 
   private async initAudioInputStream() {
     try {
-        // Enforce strict audio constraints for Echo Cancellation
+        // --- SECURITY CHECK: Microphone requires HTTPS or Localhost ---
+        if (typeof window !== 'undefined' && !window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            throw new Error("SECURE CONTEXT REQUIRED: Microphone access is blocked on HTTP. Please use localhost or enable HTTPS.");
+        }
+
         this.stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
                 sampleRate: 16000,
                 channelCount: 1,
-                echoCancellation: true,      // CRITICAL: Request hardware/software AEC
-                noiseSuppression: true,      // CRITICAL: Reduce background noise
-                autoGainControl: true        // CRITICAL: Normalize input levels
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
             }
         });
         
@@ -487,7 +486,7 @@ export class LiveClient {
         this.processor.onaudioprocess = (e) => {
             const inputData = e.inputBuffer.getChannelData(0);
             
-            // Calculate Audio Level for Visualizer
+            // Calculate Audio Level
             let sum = 0;
             for (let i = 0; i < inputData.length; i++) {
                 sum += inputData[i] * inputData[i];
@@ -501,15 +500,9 @@ export class LiveClient {
             }
 
             // Logic: Software Gating (Half-Duplex)
-            // Universally applies to BOTH Buffered (Assessment) and Open Mic (Training) modes.
-            // If AI is currently speaking, block the mic to prevent feedback loop.
             if (this.outputAudioContext) {
-                // Check if playback queue is still active
-                // ADDED: 500ms Squelch Tail (Physical Echo Protection)
-                // Wait for audio to physically leave speaker and dissipate before opening mic
                 const isAiSpeaking = this.outputAudioContext.currentTime < (this.nextStartTime + 0.5); 
                 if (isAiSpeaking) {
-                    // console.debug("Mic gated due to AI playback (Half-Duplex)");
                     return; 
                 }
             }
@@ -520,9 +513,17 @@ export class LiveClient {
         this.inputSource.connect(this.processor);
         this.processor.connect(this.inputAudioContext.destination);
 
-    } catch (e) {
+    } catch (e: any) {
         console.error("Microphone initialization failed", e);
-        this.callbacks?.onError(e as Error);
+        let msg = e.message;
+        if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+            msg = "Microphone permission denied. Please click the lock icon in the URL bar to allow access.";
+        } else if (e.name === 'NotFoundError') {
+            msg = "No microphone found on this device.";
+        } else if (msg.includes("not allowed by the user agent")) {
+            msg = "Microphone access blocked by browser policy. If testing on mobile, ensure you are using HTTPS.";
+        }
+        this.callbacks?.onError(new Error(msg));
     }
   }
 
@@ -551,18 +552,15 @@ export class LiveClient {
         source.buffer = buffer;
         source.connect(this.outputNode);
 
-        // Track active source for cancellation
         source.onended = () => {
             this.activeSources = this.activeSources.filter(s => s !== source);
         };
         this.activeSources.push(source);
 
         const now = this.outputAudioContext.currentTime;
-        // Ensure gapless or immediate playback
         const startTime = Math.max(this.nextStartTime, now);
         source.start(startTime);
         
-        // Update the pointer for when the audio will finish
         this.nextStartTime = startTime + buffer.duration;
 
     } catch (e) {
@@ -570,14 +568,11 @@ export class LiveClient {
     }
   }
 
-  // Halt all current audio playback immediately (simulate PTT override)
   cancelOutput() {
       this.activeSources.forEach(s => {
-          try { s.stop(); } catch(e) { /* ignore already stopped */ }
+          try { s.stop(); } catch(e) { /* ignore */ }
       });
       this.activeSources = [];
-      
-      // Reset the time pointer so the Software Gate opens immediately
       if (this.outputAudioContext) {
           this.nextStartTime = this.outputAudioContext.currentTime;
       }
@@ -597,8 +592,6 @@ export class LiveClient {
           }
       }
 
-      // CRITICAL FIX: Stop any incoming audio when user presses PTT (Half-Duplex)
-      // This prevents the mic from picking up the speaker output.
       this.cancelOutput();
 
       if (this.isBufferedMode) {
@@ -621,9 +614,7 @@ export class LiveClient {
               if (!this.isRecording && this.inputAudioContext?.state === 'running') {
                   try {
                       await this.inputAudioContext.suspend();
-                  } catch (e) {
-                      console.warn("Failed to suspend input context:", e);
-                  }
+                  } catch (e) { /* ignore */ }
               }
           }, 5000); 
       }
@@ -648,8 +639,7 @@ export class LiveClient {
   }
 
   disconnect() {
-      this.cancelOutput(); // Stop any playing audio
-      
+      this.cancelOutput(); 
       if (this.suspendTimer) clearTimeout(this.suspendTimer);
       
       if (this.processor) {
@@ -679,5 +669,6 @@ export class LiveClient {
           }
       });
       this.sessionPromise = null;
+      this.client = null;
   }
 }

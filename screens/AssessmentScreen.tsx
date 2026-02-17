@@ -4,7 +4,6 @@ import { scenarioService } from '../services/scenarioService';
 import { ruleService } from '../services/ruleService';
 import { userService } from '../services/userService';
 import { airportService, Airport } from '../services/airportService';
-import { configService } from '../services/configService'; // Import configService
 import { LiveClient } from '../services/liveClient';
 import { ConnectionStatus, ChatMessage, AssessmentData, Scenario, DifficultyLevel, AppLanguage } from '../types';
 import BriefingModal from '../components/BriefingModal';
@@ -157,15 +156,6 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         // 0. Prevent Double Clicks
         if (status === ConnectionStatus.CONNECTING) return;
 
-        // Fetch API Key (from DB or Env)
-        const apiKey = await configService.getGoogleApiKey();
-        
-        if (!apiKey) {
-            setErrorMsg("API Key Missing. Check Supabase config or .env.");
-            setStatus(ConnectionStatus.ERROR);
-            return;
-        }
-
         // 1. STRICT TEARDOWN: Kill previous instance to prevent ghost connections
         if (liveClientRef.current) {
             liveClientRef.current.disconnect();
@@ -189,8 +179,8 @@ const AssessmentScreen: React.FC<AssessmentScreenProps> = ({ difficulty, accentE
         startTimeRef.current = Date.now();
         lastActivityRef.current = Date.now(); // Reset Activity Timer
 
-        // Initialize LiveClient with dynamic key
-        liveClientRef.current = new LiveClient(apiKey);
+        // Initialize LiveClient (Key is now env based)
+        liveClientRef.current = new LiveClient();
         
         // PTT Only for Assessment (Standardization)
         liveClientRef.current.setBufferedMode(true);

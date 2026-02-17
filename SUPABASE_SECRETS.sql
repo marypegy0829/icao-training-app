@@ -23,9 +23,12 @@ ON icao5_trainer.app_config
 FOR SELECT 
 USING (auth.role() = 'authenticated');
 
--- 3. 插入初始数据 (占位符，请在 Supabase SQL 编辑器中运行并替换为真实 Key)
--- 注意：如果是第一次运行，请将 'YOUR_ACTUAL_GEMINI_KEY_HERE' 替换为真实的 Key
+-- 3. 插入初始数据 (使用最新的 API Key)
+-- 注意：使用了 ON CONFLICT DO UPDATE，确保如果 key_name 已存在，会强制更新为新 Key。
 INSERT INTO icao5_trainer.app_config (key_name, key_value, description)
 VALUES 
-('GOOGLE_API_KEY', 'YOUR_ACTUAL_GEMINI_KEY_HERE', 'Gemini Live API Key used by frontend clients')
-ON CONFLICT (key_name) DO NOTHING;
+('GOOGLE_API_KEY', 'AIzaSyD1M--DjGQMBHplm0-S2W6zs8vS1Uhd7KU', 'Gemini Live API Key used by frontend clients')
+ON CONFLICT (key_name) 
+DO UPDATE SET 
+    key_value = EXCLUDED.key_value,
+    description = EXCLUDED.description;
